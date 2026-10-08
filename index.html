@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Deal Checker for Excel</title>
+  <style>
+    :root { --pcb:#123c33; --pcb-2:#1c5446; --solder:#c9a54c; --paper:#f6f7f5; --ink:#19201d; --muted:#5c6a63; --line:#d6ddd8; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.55 "Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,Roboto,sans-serif; }
+    header { background: var(--pcb); color: #fff; border-bottom: 3px solid var(--solder); }
+    header div, main { max-width: 720px; margin: 0 auto; padding: 20px 16px; }
+    h1 { margin: 0; font-size: 22px; font-weight: 650; }
+    h2 { font-size: 17px; margin: 28px 0 8px; }
+    .card { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; }
+    .btn { display: inline-block; padding: 10px 18px; border-radius: 6px; border: 1px solid var(--pcb); background: var(--pcb); color: #fff; font: inherit; font-weight: 600; cursor: pointer; text-decoration: none; }
+    .btn:hover { background: var(--pcb-2); }
+    code { background: #eef1ef; padding: 1px 6px; border-radius: 4px; font-size: 14px; word-break: break-all; }
+    .muted { color: var(--muted); }
+    ol li { margin: 6px 0; }
+    #status { margin-top: 10px; font-weight: 600; color: var(--pcb-2); }
+  </style>
+</head>
+<body>
+  <header><div><h1>Deal Checker for Excel</h1></div></header>
+  <main>
+    <div class="card">
+      <p style="margin-top:0">This page is hosting the Deal Checker panel for Excel. Download your manifest (the small file that tells Excel where the panel lives), then follow the steps in the setup guide.</p>
+      <button class="btn" id="dl" type="button">Download manifest</button>
+      <div id="status" role="status"></div>
+      <p class="muted" style="margin-bottom:0">The manifest points at <code id="base"></code></p>
+    </div>
+    <h2>What to do with it</h2>
+    <ol>
+      <li>Save the downloaded <code>deal-checker-manifest.xml</code> into a folder on your PC, for example <code>C:\DealCheckerAddin</code>.</li>
+      <li>Share that folder with yourself, then add it to Excel's <b>Trusted Add-in Catalogs</b>.</li>
+      <li>Restart Excel and add <b>Deal Checker</b> from <b>Home → Add-ins → More Add-ins → Shared Folder</b>.</li>
+    </ol>
+    <p class="muted">The setup guide has every click.</p>
+  </main>
+  <script>
+    (function () {
+      var base = location.href.replace(/[?#].*$/, '').replace(/\/[^/]*$/, '');
+      document.getElementById('base').textContent = base + '/taskpane.html';
+      document.getElementById('dl').addEventListener('click', function () {
+        fetch('manifest.template.xml', { cache: 'no-store' })
+          .then(function (r) { if (!r.ok) throw new Error('missing'); return r.text(); })
+          .then(function (xml) {
+            xml = xml.split('{{BASE}}').join(base).split('{{ORIGIN}}').join(location.origin);
+            var a = document.createElement('a');
+            a.href = URL.createObjectURL(new Blob([xml], { type: 'application/xml' }));
+            a.download = 'deal-checker-manifest.xml';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            document.getElementById('status').textContent = 'Downloaded deal-checker-manifest.xml';
+          })
+          .catch(function () {
+            document.getElementById('status').textContent = 'Couldn\u2019t find manifest.template.xml next to this page. Check every file was uploaded.';
+          });
+      });
+    })();
+  </script>
+</body>
+</html>

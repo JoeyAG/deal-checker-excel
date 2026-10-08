@@ -1,0 +1,81 @@
+:root {
+  --pcb: #123c33; --pcb-2: #1c5446; --solder: #c9a54c; --paper: #f6f7f5; --ink: #19201d; --muted: #5c6a63;
+  --line: #d6ddd8; --soft: #e7ebe8; --over: #b3261e; --urgent: #b45309; --soon: #8a6d12; --ok: #2f6b3a;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--paper); color: var(--ink); }
+body { font: 13.5px/1.45 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif; font-variant-numeric: tabular-nums; }
+button, input, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--solder); outline-offset: 2px; }
+
+.top { display: flex; align-items: center; justify-content: space-between; padding: 10px 10px 10px 14px; background: var(--pcb); color: #fff; border-bottom: 3px solid var(--solder); }
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 650; font-size: 15px; }
+.mark { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--solder); color: var(--pcb); font-weight: 800; font-size: 13px; line-height: 1; }
+.icon { border: 0; background: transparent; color: #fff; width: 30px; height: 30px; border-radius: 6px; font-size: 16px; }
+.icon:hover { background: rgba(255, 255, 255, .12); }
+
+.tabs { display: flex; gap: 2px; padding: 8px 10px 0; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.tabs button { border: 0; background: none; padding: 6px 9px 8px; font-weight: 600; color: var(--muted); border-bottom: 2px solid transparent; white-space: nowrap; }
+.tabs button[aria-selected="true"] { color: var(--pcb); border-bottom-color: var(--solder); }
+
+main { padding: 12px 14px 24px; }
+.msg strong { display: block; font-size: 15px; margin-bottom: 4px; }
+.muted { color: var(--muted); } .small { font-size: 12px; }
+h2 { font-size: 12.5px; font-weight: 650; color: var(--muted); margin: 16px 0 6px; display: flex; justify-content: space-between; }
+h2:first-child { margin-top: 2px; }
+
+#setup { margin: 12px 14px 0; padding: 10px 12px; border: 1px solid var(--solder); background: #fbf6e8; border-radius: 8px; }
+#setup p { margin: 0 0 8px; }
+
+.big { display: flex; gap: 10px; margin: 0 0 6px; }
+.stat { flex: 1; background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+.stat b { display: block; font-size: 22px; line-height: 1.1; }
+.stat span { font-size: 12px; color: var(--muted); }
+.stat.alert b { color: var(--over); }
+
+.list { list-style: none; margin: 0; padding: 0; background: #fff; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.list li { border-bottom: 1px solid var(--soft); }
+.list li:last-child { border-bottom: 0; }
+.row { width: 100%; display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; text-align: left; border: 0; background: none; padding: 8px 10px; }
+.row:hover { background: #f1f4f2; }
+.row .name { font-weight: 600; }
+.row .sub { display: block; font-size: 11.5px; color: var(--muted); font-weight: 400; }
+.days { text-align: right; font-weight: 700; font-size: 15px; white-space: nowrap; }
+.days small { display: block; font-size: 11px; font-weight: 400; color: var(--muted); }
+.s-over .days { color: var(--over); } .s-urgent .days { color: var(--urgent); } .s-soon .days { color: var(--soon); } .s-ok .days { color: var(--ok); }
+.s-coming .days { color: var(--muted); }
+.tag { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 4px; background: #e2eae5; color: var(--pcb); font-weight: 600; margin-right: 4px; }
+.tag.warn { background: #f6ecd6; color: #7a4f0c; }
+
+details.more summary { cursor: pointer; font-weight: 600; color: var(--pcb-2); margin: 10px 0 6px; }
+
+.build { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; margin: 0 0 8px; width: 100%; text-align: left; display: block; }
+.build:hover { border-color: #b9c9bf; }
+.build .head { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.build .id { font-weight: 700; }
+.build .stage { font-size: 11.5px; font-weight: 650; color: var(--pcb-2); }
+.build .desc { margin: 2px 0 4px; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.chip { font-size: 11px; border: 1px dashed #b9c9bf; color: var(--muted); border-radius: 4px; padding: 0 6px; }
+
+table.grid { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.grid th, .grid td { padding: 6px 8px; border-bottom: 1px solid var(--soft); text-align: left; }
+.grid th { font-size: 11.5px; color: var(--muted); font-weight: 600; background: #fafbfa; }
+.grid td.n, .grid th.n { text-align: right; white-space: nowrap; }
+.grid tr.total td { font-weight: 700; border-bottom: 0; }
+
+.paste { width: 100%; min-height: 80px; border: 2px dashed #b9c9bf; border-radius: 8px; background: #fff; padding: 10px; resize: vertical; font-size: 12px; }
+.paste:focus { border-color: var(--solder); outline: none; }
+.btn { padding: 8px 14px; border-radius: 6px; border: 1px solid var(--pcb); background: var(--pcb); color: #fff; font-weight: 600; }
+.btn:hover { background: var(--pcb-2); } .btn:disabled { opacity: .55; cursor: default; }
+.link { border: 0; background: none; padding: 0; color: var(--pcb-2); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
+.actions { display: flex; gap: 12px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+.ok-box { background: #e6f2ea; border: 1px solid #b9d9c3; border-radius: 8px; padding: 10px 12px; margin-top: 10px; }
+.err-box { background: #fbeaea; border: 1px solid #e7b9b6; border-radius: 8px; padding: 10px 12px; margin-top: 10px; color: #7d1d17; }
+ol.steps { margin: 6px 0 10px; padding-left: 18px; }
+ol.steps li { margin: 3px 0; }
+
+.spinner { width: 16px; height: 16px; border-radius: 50%; border: 3px solid var(--line); border-top-color: var(--pcb); animation: spin .8s linear infinite; display: inline-block; vertical-align: -3px; margin-right: 8px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }

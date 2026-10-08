@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=Edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Deal Checker</title>
+  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+  <link rel="stylesheet" href="taskpane.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand"><span class="mark" aria-hidden="true">£</span>Deal Checker</div>
+    <button class="icon" id="refresh" type="button" title="Refresh from the sheet" aria-label="Refresh">⟳</button>
+  </header>
+  <nav class="tabs" role="tablist" aria-label="Sections">
+    <button role="tab" data-tab="today" aria-selected="true">Today</button>
+    <button role="tab" data-tab="builds" aria-selected="false">Builds</button>
+    <button role="tab" data-tab="stock" aria-selected="false">Stock</button>
+    <button role="tab" data-tab="watch" aria-selected="false">Watchlist</button>
+    <button role="tab" data-tab="import" aria-selected="false">Import</button>
+  </nav>
+  <div id="setup" hidden></div>
+  <main id="view" aria-live="polite"><p class="msg"><span class="spinner" aria-hidden="true"></span>Reading your workbook…</p></main>
+  <script src="core.js"></script>
+  <script src="taskpane.js"></script>
+</body>
+</html>
