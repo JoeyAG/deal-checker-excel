@@ -118,3 +118,10 @@ label.file input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 .row .chk { display: flex; gap: 6px; align-items: flex-start; cursor: pointer; }
 .row .chk input { margin-top: 3px; accent-color: var(--pcb); }
 .idbox { width: 74px; padding: 2px 6px; border: 1px solid var(--line); border-radius: 5px; font-size: 12px; }
+
+/* Automatic build alerts */
+.auto { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; margin: 10px 0 4px; }
+.auto.on { border-left: 4px solid var(--solder); }
+.auto .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+details.opts summary { cursor: pointer; font-size: 11.5px; color: var(--pcb-2); font-weight: 600; }
+details.opts div { font-size: 11.5px; color: var(--muted); margin: 2px 0 4px; }

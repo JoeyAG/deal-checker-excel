@@ -364,6 +364,8 @@
       </div>
       <p class="small muted" style="margin:0 0 4px">From each build’s <b>Missing Parts</b>, its CPU or board, and your unallocated stock. Builds with no CPU or board yet are planned around ${esc(PL.PLATFORMS.lga1151v2.cpu)} unless stock suggests otherwise.</p>
 
+      ${autoHtml(plan)}
+
       <h2><span>To buy</span><span>${plan.shopping.length}</span></h2>
       ${plan.shopping.length ? `<ul class="list">${plan.shopping.map((g, i) => {
         const w = watched.get(lc(watchLabel(g)));
@@ -403,7 +405,98 @@
     }));
     view.querySelectorAll('[data-addwatch]').forEach(b => b.addEventListener('click', () => addShopWatch(plan.shopping[+b.dataset.addwatch], +b.dataset.addwatch)));
     view.querySelectorAll('[data-alloc]').forEach(b => b.addEventListener('click', () => allocateBuild(b.dataset.alloc, b)));
+    wireAuto(plan);
     if (hubOn && !hubCache) loadHub().then(() => { if (tab === 'shop') renderShop(); }).catch(() => {});
+  }
+
+  // ---- automatic alerts for builds --------------------------------------------
+
+  const PRS = DealPairings;
+  let autoBusy = false;
+  let autoMsg = '';
+  let autoTried = '';
+
+  function autoFor(plan) {
+    const auto = PL.needsForAlerts(plan, purchases());
+    auto.hash = JSON.stringify([auto.needs.map(n => [n.id, n.builds]), auto.parts.map(g => [g.label, g.count])]);
+    return auto;
+  }
+
+  function optionsHtml(n) {
+    if (n.type === 'gpu') return esc(PRS.acceptableGpus(n.cpu).map(g => DealSpecs.label(g)).join(', '));
+    const byPf = new Map();
+    PRS.acceptableCpus(n.gpu, { ddr: n.ddr, platform: n.platform }).forEach(c => {
+      if (!byPf.has(c.platform)) byPf.set(c.platform, []);
+      byPf.get(c.platform).push(c.name);
+    });
+    return [...byPf.entries()].map(([pf, names]) => `<div><b>${esc(PRS.PLATFORMS[pf].name)}</b>: ${esc(names.join(', '))}</div>`).join('');
+  }
+
+  function autoHtml(plan) {
+    if (!isHubSet()) return `<div class="auto"><b>Automatic alerts for builds</b><div class="small muted">Connect your Deal Alerts sheet on the <b>Watch</b> tab, and the sheet will look for CPU + board bundles, CPUs and graphics cards that suit each build.</div></div>`;
+    const auto = autoFor(plan);
+    const p = prefs();
+    const on = !!p.autoAlerts;
+    const count = auto.needs.length + auto.parts.length;
+    return `<div class="auto ${on ? 'on' : ''}">
+      <div class="head"><b>Automatic alerts for builds</b><span class="tag ${on ? '' : 'warn'}">${on ? 'on' : 'off'}</span></div>
+      ${count ? `<ul class="plain">${auto.needs.map((n, i) => `<li><b>${esc(n.label)}</b>
+          <details class="opts"><summary>${n.type === 'gpu' ? PRS.acceptableGpus(n.cpu).length + ' cards that suit it' : PRS.acceptableCpus(n.gpu, { ddr: n.ddr, platform: n.platform }).length + ' CPUs that pair well'}${n.type === 'combo' ? ', with any board that fits' : ''}</summary>${optionsHtml(n)}</details></li>`).join('')}
+          ${auto.parts.map(g => `<li>${esc(g.label)} <span class="muted">×${g.count}</span></li>`).join('')}</ul>`
+        : '<div class="small muted">Nothing to look for: stock covers every build.</div>'}
+      <div class="small muted">Bundles alert when they cost at least 20% less than their parts are worth. Prices come from your purchase history and then from sold prices the Chrome extension collects while you browse eBay.</div>
+      <div class="actions" style="margin-top:6px">
+        ${on ? `<button class="btn sm ghost" type="button" id="auto-update">Update now</button><button class="link" type="button" id="auto-off">Turn off</button>`
+          : `<button class="btn sm" type="button" id="auto-on" ${count ? '' : 'disabled'}>Turn on automatic alerts</button>`}
+        <span class="small" id="auto-msg">${esc(autoMsg || (on && p.autoAt ? 'Updated ' + new Date(p.autoAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''))}</span>
+      </div></div>`;
+  }
+
+  function wireAuto(plan) {
+    if (!isHubSet()) return;
+    const go = () => pushAuto(plan, true);
+    const on = document.getElementById('auto-on');
+    const upd = document.getElementById('auto-update');
+    const off = document.getElementById('auto-off');
+    if (on) on.addEventListener('click', go);
+    if (upd) upd.addEventListener('click', go);
+    if (off) off.addEventListener('click', () => pushAuto(plan, false));
+    // Keep the sheet in step as builds change: when automatic alerts are on and the needs moved on.
+    const p = prefs();
+    const h = autoFor(plan).hash;
+    if (p.autoAlerts && !autoBusy && h !== p.autoHash && h !== autoTried) { autoTried = h; pushAuto(plan, true, true); }
+  }
+
+  async function pushAuto(plan, turnOn, quiet) {
+    if (autoBusy) return;
+    autoBusy = true;
+    const msg = document.getElementById('auto-msg');
+    if (msg) msg.textContent = turnOn ? 'Updating your alerts sheet…' : 'Turning off…';
+    try {
+      const auto = autoFor(plan);
+      const keep = new Set();
+      if (turnOn) {
+        await hubCall({ action: 'needs.replace', needs: auto.needs });
+        const seeds = auto.seeds.filter(x => x.median);
+        if (seeds.length) await hubCall({ action: 'prices.put', prices: seeds });
+        const entries = auto.parts.map(g => Object.assign(PL.watchEntry(g, null, prefs().greatPct), { source: 'auto' }));
+        entries.forEach(e => keep.add(e.label.toLowerCase()));
+        if (entries.length) hubCache = await hubCall({ action: 'put', watches: entries });
+      } else {
+        await hubCall({ action: 'needs.replace', needs: [] });
+      }
+      if (!hubCache) hubCache = await hubCall({ action: 'list' });
+      const stale = (hubCache.watches || []).filter(w => w.source === 'auto' && !keep.has(String(w.label).toLowerCase())).map(w => w.label);
+      if (stale.length) hubCache = await hubCall({ action: 'remove', labels: stale });
+      else hubCache = await hubCall({ action: 'list' });
+      await savePrefs(turnOn ? { autoAlerts: true, autoHash: auto.hash, autoAt: Date.now() } : { autoAlerts: false, autoHash: '' });
+      autoMsg = turnOn ? `Updated: ${plural(auto.needs.length, 'build search', 'build searches')} and ${plural(auto.parts.length, 'part watch', 'part watches')}.` : 'Automatic alerts are off.';
+    } catch (e) {
+      autoMsg = e.message || String(e);
+    } finally {
+      autoBusy = false;
+    }
+    if (tab === 'shop' && !(quiet && !autoMsg)) renderShop();
   }
 
   const watchLabel = g => (g.item.cat === 'generic' ? g.label : DealSpecs.label(g.item));
@@ -625,7 +718,9 @@
     const text = await res.text();
     let data;
     try { data = JSON.parse(text); } catch (e) {
-      throw new Error(/<html/i.test(text) ? 'The alerts sheet asked for a Google sign-in. Redeploy its web app with “Who has access: Anyone”.' : 'Unexpected reply from the alerts sheet.');
+      const title = (text.match(/<title>([^<]*)<\/title>/i) || [])[1] || '';
+      const body = text.replace(/<style[\s\S]*?<\/style>|<script[\s\S]*?<\/script>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160);
+      throw new Error(`The alerts sheet sent back a web page instead of data. Google said: “${(title + ' ' + body).trim().slice(0, 200)}”. In Apps Script, open Executions (left sidebar) to see the error.`);
     }
     if (!data.ok) throw new Error(data.error || 'The alerts sheet refused the request.');
     if (!Array.isArray(data.watches)) {

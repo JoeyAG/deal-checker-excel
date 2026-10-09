@@ -15,145 +15,9 @@ var DealPlanner = (function () {
   const S = (typeof DealSpecs !== 'undefined') ? DealSpecs : require('./specs.js');
   const norm = s => String(s == null ? '' : s).trim().toLowerCase();
 
-  // ---------------------------------------------------------------------------
-  // Platforms
-  // ---------------------------------------------------------------------------
-
-  const PLATFORMS = {
-    lga1155: { name: 'LGA1155 (Intel 2nd/3rd gen)', ddr: 3, chipsets: ['h61', 'b75', 'h77', 'z77', 'z68', 'p67', 'h67'], cpu: 'i5-3570', mount: '1155', nvme: false },
-    lga1150: { name: 'LGA1150 (Intel 4th/5th gen)', ddr: 3, chipsets: ['h81', 'b85', 'h87', 'z87', 'h97', 'z97'], cpu: 'i5-4590', mount: '1150', nvme: false },
-    lga1151: { name: 'LGA1151 (Intel 6th/7th gen)', ddr: 4, chipsets: ['h110', 'b150', 'h170', 'z170', 'b250', 'h270', 'z270'], cpu: 'i5-6500', mount: '1151', nvme: true },
-    lga1151v2: { name: 'LGA1151 (Intel 8th/9th gen)', ddr: 4, chipsets: ['h310', 'b360', 'h370', 'z370', 'b365', 'z390'], cpu: 'i5-9400F', mount: '1151', nvme: true },
-    lga1200: { name: 'LGA1200 (Intel 10th/11th gen)', ddr: 4, chipsets: ['h410', 'b460', 'h470', 'z490', 'h510', 'b560', 'h570', 'z590'], cpu: 'i5-10400F', mount: '1200', nvme: true },
-    lga1700: { name: 'LGA1700 (Intel 12th–14th gen)', ddr: 4, chipsets: ['h610', 'b660', 'h670', 'z690', 'b760', 'h770', 'z790'], cpu: 'i5-12400F', mount: '1700', nvme: true },
-    lga1851: { name: 'LGA1851 (Intel Core Ultra)', ddr: 5, chipsets: ['b860', 'z890'], cpu: 'Core Ultra 5 245K', mount: '1851', nvme: true },
-    lga2011: { name: 'LGA2011 (Intel X79)', ddr: 3, quad: true, chipsets: ['x79'], cpu: 'i7-4930K', mount: '2011', nvme: false },
-    lga20113: { name: 'LGA2011-3 (Intel X99)', ddr: 4, quad: true, chipsets: ['x99'], cpu: 'i7-5820K', mount: '2011', nvme: true },
-    lga2066: { name: 'LGA2066 (Intel X299)', ddr: 4, quad: true, chipsets: ['x299'], cpu: 'i7-7820X', mount: '2066', nvme: true },
-    am4: { name: 'AM4 (Ryzen 1000–5000)', ddr: 4, chipsets: ['a320', 'b350', 'x370', 'b450', 'x470', 'a520', 'b550', 'x570'], cpu: 'Ryzen 5 3600', mount: 'am4', nvme: true },
-    am5: { name: 'AM5 (Ryzen 7000+)', ddr: 5, chipsets: ['a620', 'b650', 'b650e', 'x670', 'x670e', 'b840', 'b850', 'x870', 'x870e'], cpu: 'Ryzen 5 7600', mount: 'am5', nvme: true }
-  };
-  const DEFAULT_PLATFORM = 'lga1151v2'; // cheap, plentiful used, and balanced with a 1080-class card
-
-  const CHIPSET_PLATFORM = {};
-  Object.keys(PLATFORMS).forEach(k => PLATFORMS[k].chipsets.forEach(c => { CHIPSET_PLATFORM[c] = k; }));
-
-  function cpuPlatform(cpu) {
-    if (!cpu) return null;
-    const f = cpu.family;
-    const sfx = cpu.suffix || '';
-    if (/^i\d$/.test(f)) {
-      const n = cpu.num;
-      if (n.length === 3) return null;
-      const gen = n.length === 5 ? +n.slice(0, 2) : +n[0];
-      const hedtX = /^x/.test(sfx);
-      if ((gen === 3 || gen === 4) && /^[34][89]\d\d$/.test(n)) return 'lga2011';
-      if (gen === 5 && /^5[89]\d\d$/.test(n)) return 'lga20113';
-      if (gen === 6 && /^6[89]\d\d$/.test(n)) return 'lga20113';
-      if ((gen === 7 || gen === 9 || gen === 10) && hedtX) return 'lga2066';
-      if (gen <= 3) return 'lga1155';
-      if (gen <= 5) return 'lga1150';
-      if (gen <= 7) return 'lga1151';
-      if (gen <= 9) return 'lga1151v2';
-      if (gen <= 11) return 'lga1200';
-      if (gen <= 14) return 'lga1700';
-      return null;
-    }
-    if (f === 'ultra') return 'lga1851';
-    if (f === 'ryzen') return +cpu.num[0] >= 7 ? 'am5' : 'am4';
-    if (f === 'pentium' || f === 'celeron') {
-      const m = String(cpu.num).match(/^g(\d)(\d)/);
-      if (!m) return null;
-      if (m[1] === '3' || m[1] === '1') return 'lga1150';
-      if (m[1] === '4') return +m[2] >= 9 ? 'lga1151v2' : 'lga1151';
-      if (m[1] === '5') return 'lga1151v2';
-      if (m[1] === '6') return 'lga1200';
-      if (m[1] === '7') return 'lga1700';
-    }
-    return null;
-  }
-
-  // Chipsets on a platform that run this CPU without fuss.
-  function chipsetsFor(platform, cpu) {
-    const all = PLATFORMS[platform].chipsets;
-    if (!cpu) return all;
-    if (platform === 'am4' && cpu.family === 'ryzen') {
-      const g = +cpu.num[0];
-      if (g === 1) return ['a320', 'b350', 'x370', 'b450', 'x470'];
-      if (g === 2) return ['b350', 'x370', 'b450', 'x470', 'x570'];
-      if (g === 3) return ['b450', 'x470', 'b550', 'x570', 'a520'];
-      return ['b550', 'x570', 'a520', 'b450', 'x470'];
-    }
-    if (platform === 'lga1200' && cpu.num && cpu.num.slice(0, 2) === '11') return ['h510', 'b560', 'h570', 'z590'];
-    if (platform === 'lga1155' && cpu.num && cpu.num[0] === '3') return ['b75', 'h77', 'z77', 'z68', 'h61'];
-    return all;
-  }
-
-  // A board name the strict parser misses, e.g. "GA-Z97P-D3".
-  function looseChipset(text) {
-    const t = norm(text);
-    const s = S.parseAs('mobo', t);
-    if (s) return s.chipset;
-    const re = /(?:^|[^a-z0-9])([abhpxz]\d{2,3})(e)?/g;
-    let m;
-    while ((m = re.exec(t))) {
-      const c = m[1] + (m[2] && CHIPSET_PLATFORM[m[1] + 'e'] ? 'e' : '');
-      if (CHIPSET_PLATFORM[c]) return c;
-    }
-    return null;
-  }
-
-  // ---------------------------------------------------------------------------
-  // How big a PSU, which card to suggest, which CPUs are worth pairing
-  // ---------------------------------------------------------------------------
-
-  const PSU_FOR_GPU = {
-    450: 'gt710 gt730 gt1030 gtx750 gtx750ti gtx950 gtx1050 gtx1050ti gtx1630 gtx1650 gtx1650super rx460 rx550 rx560 rx6400 rx6500xt arca380',
-    550: 'gtx960 gtx970 gtx1060 gtx1660 gtx1660super gtx1660ti rx470 rx480 rx570 rx580 rx590 rx5500xt rtx3050 arca580 rx7600 rtx4060',
-    600: 'gtx980 gtx980ti gtx1070 gtx1070ti rtx2060 rtx2060super rx5600xt rx5700 rx6600 rx6600xt rx6650xt rtx3060 rtx4060ti arca750 arca770',
-    650: 'gtx1080 gtx1080ti rtx2070 rtx2070super rtx2080 rtx3060ti rtx3070 rx5700xt rx6700 rx6700xt rx6750xt rx7700xt rtx4070 rtx4070super',
-    750: 'rtx2080super rtx2080ti rtx3070ti rtx3080 rtx4070ti rtx4070tisuper rx6800 rx6800xt rx7800xt rx7900gre rtx5070',
-    850: 'rtx3080ti rtx3090 rtx4080 rtx4080super rx6900xt rx6950xt rx7900xt rx7900xtx rtx5070ti rtx5080',
-    1000: 'rtx3090ti rtx4090 rtx5090'
-  };
-  const GPU_WATTS = {};
-  Object.keys(PSU_FOR_GPU).forEach(w => PSU_FOR_GPU[w].split(' ').forEach(k => { GPU_WATTS[k] = +w; }));
-  const gpuKey = g => (g.prefix + g.num + String(g.variant || '').replace(/\s+/g, '')).toLowerCase();
-
-  function gpuClass(gpu) {
-    if (!gpu) return 0;
-    if (GPU_WATTS[gpuKey(gpu)]) return GPU_WATTS[gpuKey(gpu)];
-    if (gpu.prefix === 'gt') return 450;
-    return 650;
-  }
-
-  function isHedt(cpu, platform) {
-    return !!(platform && PLATFORMS[platform] && PLATFORMS[platform].quad) || (cpu && cpu.family === 'i9');
-  }
-
-  function psuWattsFor(gpu, cpu, platform) {
-    let w = gpu ? gpuClass(gpu) : 400;
-    if (isHedt(cpu, platform)) w += 100;
-    return w;
-  }
-
-  // A sensible card for a CPU that has no graphics card yet.
-  function suggestGpu(platform) {
-    const pick = {
-      lga1155: ['gtx', '1060', '', 6], lga1150: ['gtx', '1060', '', 6], lga2011: ['gtx', '1060', '', 6],
-      lga1151: ['gtx', '1070', '', 8], lga1151v2: ['gtx', '1080', '', 8], am4: ['gtx', '1080', '', 8],
-      lga20113: ['gtx', '1080', '', 8], lga2066: ['gtx', '1080', 'ti', 11],
-      lga1200: ['rtx', '3060', '', 12], lga1700: ['rtx', '3060', '', 12], am5: ['rtx', '3060', '', 12], lga1851: ['rtx', '3060', '', 12]
-    }[platform] || ['gtx', '1070', '', 8];
-    return { cat: 'gpu', prefix: pick[0], num: pick[1], variant: pick[2], vram: pick[3] };
-  }
-
-  // CPUs worth putting with a gaming card (not a Pentium with a 1080 Ti).
-  function cpuFitsGaming(cpu) {
-    if (!cpu) return false;
-    if (/^i[579]$/.test(cpu.family) || cpu.family === 'ultra') return true;
-    return cpu.family === 'ryzen' && +cpu.tier >= 5;
-  }
+  const PR = (typeof DealPairings !== 'undefined') ? DealPairings : require('./pairings.js');
+  const { PLATFORMS, DEFAULT_PLATFORM, CHIPSET_PLATFORM, cpuPlatform, chipsetsFor, looseChipset, gpuClass,
+    psuWattsFor, suggestGpu, cpuFitsGaming } = PR;
 
   // ---------------------------------------------------------------------------
   // What each missing part has to be
@@ -453,7 +317,9 @@ var DealPlanner = (function () {
       out.push({
         id, row: b._row, description: b['Build Description'] || '',
         platform: { key: platform, name: P.name, from: platformFrom },
-        gpu: gpu ? S.label(gpu) : null, needs, notes
+        gpu: gpu ? S.label(gpu) : null, needs, notes,
+        specs: { cpu: have.cpu || null, mobo: have.mobo || null, ram: have.ram || null, gpu: gpu || null },
+        cardFor: effectiveGpu || null
       });
     }
 
@@ -523,7 +389,96 @@ var DealPlanner = (function () {
     };
   }
 
+  // ---------------------------------------------------------------------------
+  // Automatic alerts for builds: what each unfinished build is waiting for
+  // ---------------------------------------------------------------------------
+
+  const range = ids => {
+    const sorted = ids.slice().sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
+    if (sorted.length <= 2) return sorted.join(', ');
+    const nums = sorted.map(id => +String(id).replace(/\D/g, ''));
+    const run = nums.every((n, i) => !i || n === nums[i - 1] + 1);
+    return run ? `${sorted[0]}–${sorted[sorted.length - 1]}` : `${sorted.slice(0, 3).join(', ')}${sorted.length > 3 ? ` +${sorted.length - 3}` : ''}`;
+  };
+  const cardName = g => S.label(Object.assign({}, g, { vram: null }));
+
+  /*
+   * From a plan: the multi-choice needs the alerts sheet looks for in bundles and
+   * listings (CPU + board for a card, a CPU for a board, a card for a CPU), plus
+   * single-part watches for the rest. Parts covered by stock are left out.
+   *   Returns { needs, parts, seeds }
+   *   needs: [{ id, type: 'combo'|'cpu'|'gpu', label, builds, gpu, ddr, platform, chipsets, cpu, wantsRam, options }]
+   *   parts: watch groups (same shape as plan.shopping) for RAM, PSU, storage and fixed boards
+   *   seeds: price-book entries from your own purchase history
+   */
+  function needsForAlerts(planResult, purchases) {
+    const groups = new Map();
+    const add = (key, make, buildId) => {
+      if (!groups.has(key)) groups.set(key, Object.assign(make(), { builds: [] }));
+      groups.get(key).builds.push(buildId);
+    };
+    const partKeys = new Set();
+    planResult.builds.forEach(b => {
+      const open = new Set(b.needs.filter(n => !n.stock).map(n => n.kind));
+      const fixed = b.platform.from === 'cpu' || b.platform.from === 'board' || b.platform.from === 'stock';
+      const card = b.specs.gpu || (open.has('gpu') ? null : b.cardFor);
+      const ddr = b.specs.ram && b.specs.ram.gen ? b.specs.ram.gen : null;
+      if (open.has('cpu') && open.has('mobo') && !fixed && card) {
+        add(`combo|${PR.gpuClass(card)}|${ddr || ''}|${open.has('ram') ? 'r' : ''}`, () => ({
+          type: 'combo', gpu: Object.assign({}, card, { vram: null }), ddr, wantsRam: open.has('ram'),
+          options: { cpus: PR.acceptableCpus(card, { ddr }).map(c => c.name) }
+        }), b.id);
+      } else if (open.has('cpu') && card) {
+        const chips = b.needs.find(n => n.kind === 'mobo') ? null : (b.specs.mobo ? [b.specs.mobo.chipset] : null);
+        add(`cpu|${PR.gpuClass(card)}|${b.platform.key}|${chips ? chips.join('/') : ''}`, () => ({
+          type: 'cpu', gpu: Object.assign({}, card, { vram: null }), platform: b.platform.key, chipsets: chips,
+          options: { cpus: PR.acceptableCpus(card, { platform: b.platform.key }).filter(c => !chips || chips.some(ch => PR.boardFits(c.spec, ch))).map(c => c.name) }
+        }), b.id);
+      }
+      if (open.has('gpu') && b.specs.cpu) {
+        add(`gpu|${PR.acceptableGpuClasses(b.specs.cpu).join('-')}`, () => ({
+          type: 'gpu', cpu: b.specs.cpu, options: { gpus: PR.acceptableGpus(b.specs.cpu).map(g => S.label(g)) }
+        }), b.id);
+      }
+      // Single parts that don't depend on which CPU you end up with.
+      b.needs.filter(n => !n.stock && ['ram', 'psu', 'storage'].includes(n.kind) || (!n.stock && n.kind === 'mobo' && fixed))
+        .forEach(n => partKeys.add(n.kind + '|' + JSON.stringify(n.item)));
+    });
+
+    const needs = [...groups.values()].map(g => {
+      const who = range(g.builds);
+      const label = g.type === 'combo' ? `CPU + board for ${cardName(g.gpu)}${g.ddr ? ` (DDR${g.ddr})` : ''}`
+        : g.type === 'cpu' ? `CPU for ${cardName(g.gpu)} on ${PLATFORMS[g.platform].name.split(' (')[0]}${g.chipsets ? ' ' + g.chipsets.map(c => c.toUpperCase()).join('/') : ''}`
+          : `Graphics card for ${S.label(g.cpu)}`;
+      const id = [g.type, g.gpu ? cardName(g.gpu) : '', g.cpu ? S.label(g.cpu) : '', g.ddr || '', g.platform || '', (g.chipsets || []).join('/'), g.wantsRam ? 'ram' : ''].join('|').toLowerCase();
+      return Object.assign(g, { id, label: `${label} · ${who}` });
+    });
+    const parts = planResult.shopping.filter(s => partKeys.has(s.kind + '|' + JSON.stringify(s.item)));
+
+    // Price-book seeds from your own past purchases, for every option the needs could use.
+    const all = purchases.map(p => ({ p, ps: partSpec(p) }));
+    const seeds = new Map();
+    const seed = spec => {
+      const b = PR.bookKey(spec);
+      if (!b || seeds.has(b.key)) return;
+      const h = priceFromHistory(b.item, all);
+      seeds.set(b.key, { key: b.key, item: b.item, median: h.typical, n: h.seen, updated: h.typical ? Date.now() : null, source: h.typical ? 'sheet' : null });
+    };
+    needs.forEach(n => {
+      if (n.type === 'combo' || n.type === 'cpu') {
+        PR.acceptableCpus(n.gpu, { ddr: n.ddr, platform: n.platform }).forEach(c => {
+          seed(c.spec);
+          PR.chipsetsFor(c.platform, c.spec).forEach(ch => seed({ cat: 'mobo', chipset: ch }));
+        });
+        if (n.wantsRam) seed({ cat: 'ram', gen: n.ddr || 4, totalGB: 16 });
+      }
+      if (n.type === 'gpu') PR.acceptableGpus(n.cpu).forEach(seed);
+    });
+    return { needs, parts, seeds: [...seeds.values()] };
+  }
+
   return {
+    needsForAlerts, PAIRINGS: PR,
     PLATFORMS, KIND_NAME, SHEET_CATEGORY, cpuPlatform, chipsetsFor, looseChipset, gpuClass, psuWattsFor, suggestGpu,
     missingKinds, partSpec, partText, plan, priceFromHistory, ebayUrl, searchText, watchEntry, coolerFits
   };
