@@ -15,8 +15,8 @@ button { cursor: pointer; }
 .icon { border: 0; background: transparent; color: #fff; width: 30px; height: 30px; border-radius: 6px; font-size: 16px; }
 .icon:hover { background: rgba(255, 255, 255, .12); }
 
-.tabs { display: flex; gap: 2px; padding: 8px 10px 0; border-bottom: 1px solid var(--line); overflow-x: auto; }
-.tabs button { border: 0; background: none; padding: 6px 9px 8px; font-weight: 600; color: var(--muted); border-bottom: 2px solid transparent; white-space: nowrap; }
+.tabs { display: flex; gap: 0; padding: 8px 6px 0; border-bottom: 1px solid var(--line); overflow-x: auto; }
+.tabs button { border: 0; background: none; padding: 6px 7px 8px; font-size: 13px; font-weight: 600; color: var(--muted); border-bottom: 2px solid transparent; white-space: nowrap; }
 .tabs button[aria-selected="true"] { color: var(--pcb); border-bottom-color: var(--solder); }
 
 main { padding: 12px 14px 24px; }
@@ -79,3 +79,42 @@ ol.steps li { margin: 3px 0; }
 .spinner { width: 16px; height: 16px; border-radius: 50%; border: 3px solid var(--line); border-top-color: var(--pcb); animation: spin .8s linear infinite; display: inline-block; vertical-align: -3px; margin-right: 8px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
+
+/* Shop */
+.acts { display: block; font-size: 12px; margin-top: 3px; }
+.acts a, .link { color: var(--pcb-2); font-weight: 600; }
+.watchform { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; font-size: 12px; }
+.watchform[hidden] { display: none; }
+.watchform input { width: 70px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 5px; }
+.btn.sm { padding: 4px 10px; font-size: 12px; }
+.btn.ghost { background: #fff; color: var(--pcb); }
+.btn.ghost:hover { background: #f1f4f2; }
+ul.plain { margin: 4px 0 0; padding-left: 16px; font-size: 12.5px; }
+ul.plain li { margin: 2px 0; }
+.list .row .sub .link { font-size: 11.5px; }
+
+/* Sell */
+.field { display: block; margin: 0 0 12px; }
+.field > span { display: flex; justify-content: space-between; align-items: baseline; font-weight: 650; font-size: 12.5px; color: var(--muted); margin-bottom: 3px; }
+.field input, .field select, .field textarea { width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+.field textarea { font-size: 12.5px; line-height: 1.45; resize: vertical; }
+.field small { display: block; margin-top: 3px; }
+.field.inline { display: flex; align-items: center; gap: 8px; }
+.field.inline > span { margin: 0; min-width: 96px; }
+.field.inline input { width: 70px; }
+.field.inline select { width: auto; }
+.with-btn { display: flex; gap: 6px; align-items: center; }
+.with-btn input { flex: 1; min-width: 0; }
+.pfx { font-weight: 600; }
+.grid.specs td { padding: 4px 8px; font-size: 12px; }
+.grid.specs td:first-child { color: var(--muted); width: 45%; }
+.warn-box { background: #fbf3e2; border: 1px solid #ecd6a8; border-radius: 8px; padding: 8px 10px; margin: 0 0 10px; font-size: 12.5px; color: #6b4a0e; }
+.warn-text { color: var(--urgent); }
+
+/* Import: files and sales */
+label.file { display: inline-block; position: relative; }
+label.file input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.row.sale { align-items: start; }
+.row .chk { display: flex; gap: 6px; align-items: flex-start; cursor: pointer; }
+.row .chk input { margin-top: 3px; accent-color: var(--pcb); }
+.idbox { width: 74px; padding: 2px 6px; border: 1px solid var(--line); border-radius: 5px; font-size: 12px; }
