@@ -125,3 +125,6 @@ label.file input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 .auto .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
 details.opts summary { cursor: pointer; font-size: 11.5px; color: var(--pcb-2); font-weight: 600; }
 details.opts div { font-size: 11.5px; color: var(--muted); margin: 2px 0 4px; }
+
+.pct-row { margin: 6px 0 4px; }
+.pct-row input { width: 46px; padding: 1px 4px; border: 1px solid var(--line); border-radius: 4px; text-align: right; }

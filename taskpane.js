@@ -444,7 +444,9 @@
           <details class="opts"><summary>${n.type === 'gpu' ? PRS.acceptableGpus(n.cpu).length + ' cards that suit it' : PRS.acceptableCpus(n.gpu, { ddr: n.ddr, platform: n.platform }).length + ' CPUs that pair well'}${n.type === 'combo' ? ', with any board that fits' : ''}</summary>${optionsHtml(n)}</details></li>`).join('')}
           ${auto.parts.map(g => `<li>${esc(g.label)} <span class="muted">×${g.count}</span></li>`).join('')}</ul>`
         : '<div class="small muted">Nothing to look for: stock covers every build.</div>'}
-      <div class="small muted">Bundles alert when they cost at least 20% less than their parts are worth. Prices come from your purchase history and then from sold prices the Chrome extension collects while you browse eBay.</div>
+      <div class="pct-row small">Alert when a CPU + board bundle is at least <input type="number" id="pct-bundle" min="5" max="80" value="${hubSettings().bundlePct}" aria-label="Bundle percentage">% under its parts’ value,
+        and a single CPU or card at least <input type="number" id="pct-part" min="5" max="80" value="${hubSettings().partPct}" aria-label="Single part percentage">% under. <button class="link" type="button" id="pct-save">Save</button></div>
+      <div class="small muted">Parts are valued from your purchase history, then from sold prices the Chrome extension collects while you browse eBay.</div>
       <div class="actions" style="margin-top:6px">
         ${on ? `<button class="btn sm ghost" type="button" id="auto-update">Update now</button><button class="link" type="button" id="auto-off">Turn off</button>`
           : `<button class="btn sm" type="button" id="auto-on" ${count ? '' : 'disabled'}>Turn on automatic alerts</button>`}
@@ -452,8 +454,24 @@
       </div></div>`;
   }
 
+  function hubSettings() {
+    return Object.assign({ bundlePct: 35, partPct: 25 }, (hubCache && hubCache.settings) || {});
+  }
+
   function wireAuto(plan) {
     if (!isHubSet()) return;
+    const save = document.getElementById('pct-save');
+    if (save) save.addEventListener('click', async () => {
+      const b = +document.getElementById('pct-bundle').value;
+      const pp = +document.getElementById('pct-part').value;
+      if (!(b >= 5 && b <= 80 && pp >= 5 && pp <= 80)) { document.getElementById('auto-msg').textContent = 'Use a number between 5 and 80.'; return; }
+      save.textContent = 'Saving…';
+      try {
+        hubCache = await hubCall({ action: 'settings.put', bundlePct: b, partPct: pp });
+        autoMsg = `Saved: bundles ${hubSettings().bundlePct}% under, single parts ${hubSettings().partPct}% under.`;
+      } catch (e) { autoMsg = e.message || String(e); }
+      renderShop();
+    });
     const go = () => pushAuto(plan, true);
     const on = document.getElementById('auto-on');
     const upd = document.getElementById('auto-update');

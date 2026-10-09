@@ -759,9 +759,25 @@ var DealSpecs = (function () {
 
   // Returns { ok, why, exact, spec }. "exact" means the sale stated every spec that matters
   // here (e.g. the stick layout or the PCIe gen); "ok" alone means nothing contradicted it.
+  // A title that lists several sizes side by side ("128GB 256GB 512GB 1TB", "8GB/16GB/32GB")
+  // is a listing with options: its price is usually the cheapest option, not the one you want.
+  function sizeOptions(text) {
+    const t = low(text);
+    const re = /(\d+(?:\.\d+)?)\s?(tb|gb)\b/g;
+    const toks = [];
+    let m;
+    while ((m = re.exec(t))) toks.push({ gb: m[2] === 'tb' ? Math.round(parseFloat(m[1]) * 1000) : parseFloat(m[1]), index: m.index, end: m.index + m[0].length });
+    for (let i = 1; i < toks.length; i++) {
+      const between = t.slice(toks[i - 1].end, toks[i].index);
+      if (toks[i].gb !== toks[i - 1].gb && between.length <= 5 && /^[\s/,|]*(?:or)?[\s/,|]*$/.test(between)) return true;
+    }
+    return false;
+  }
+
   function matchTitle(target, title, opts) {
     const t = low(title);
     if (target.cat === 'pc') return Object.assign({ exact: true }, matchPc(target, t));
+    if ((target.cat === 'storage' || target.cat === 'ram') && sizeOptions(t)) return { ok: false, why: 'spec' };
 
     // Another kind of part in the title: a bundle if this part is in it too, otherwise a different item.
     const own = findAll(target.cat, t, { guard: true });
@@ -1092,7 +1108,8 @@ var DealSpecs = (function () {
     pcItem,
     storageHintForCategory,
     layoutText,
-    detailWord
+    detailWord,
+    sizeOptions
   };
 })();
 
