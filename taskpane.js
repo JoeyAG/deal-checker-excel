@@ -615,13 +615,24 @@
   async function hubCall(body, override) {
     const p = Object.assign(prefs(), override || {});
     if (!HUB_RE.test(p.hubUrl) || !p.hubKey) throw new Error('Connect your Deal Alerts sheet on the Watch tab first.');
-    const res = await fetch(p.hubUrl, { method: 'POST', body: JSON.stringify(Object.assign({ key: p.hubKey }, body)) });
+    let res;
+    try {
+      res = await fetch(p.hubUrl, { method: 'POST', body: JSON.stringify(Object.assign({ key: p.hubKey }, body)) });
+    } catch (e) {
+      // The browser hides the reason; almost always the web app isn't open to "Anyone" or needs re-authorising.
+      throw new Error('Couldn’t reach the alerts sheet. Open the web app URL in your browser: it should show {"ok":true,"hub":"deal-alerts"…}. If you see a Google sign-in or an authorisation message instead, redeploy the web app with Who has access: Anyone (Deploy → Manage deployments → edit → New version).');
+    }
     const text = await res.text();
     let data;
     try { data = JSON.parse(text); } catch (e) {
       throw new Error(/<html/i.test(text) ? 'The alerts sheet asked for a Google sign-in. Redeploy its web app with “Who has access: Anyone”.' : 'Unexpected reply from the alerts sheet.');
     }
     if (!data.ok) throw new Error(data.error || 'The alerts sheet refused the request.');
+    if (!Array.isArray(data.watches)) {
+      // A reply without the watchlist means the sheet's doPost didn't run: an old deployment, or the request arrived as a plain page visit.
+      throw new Error(`The alerts sheet answered, but without your watchlist (it said: ${text.slice(0, 90)}). In Apps Script, check the whole new Code.gs is saved, then Deploy → Manage deployments → edit → Version: New version → Deploy, and connect again.`);
+    }
+    data.alerts = Array.isArray(data.alerts) ? data.alerts : [];
     return data;
   }
   async function loadHub() { hubCache = await hubCall({ action: 'list' }); return hubCache; }
@@ -645,8 +656,8 @@
         try {
           hubCache = await hubCall({ action: 'list' }, { hubUrl: url, hubKey: key });
           await savePrefs({ hubUrl: url, hubKey: key, greatPct: hubCache.greatPct || 25 });
-          renderWatch();
-        } catch (e) { out.textContent = e.message || String(e); }
+        } catch (e) { out.textContent = e.message || String(e); return; }
+        try { renderWatch(); } catch (e) { out.textContent = 'Connected, but the list couldn’t be shown: ' + (e.message || e); }
       });
       return;
     }
