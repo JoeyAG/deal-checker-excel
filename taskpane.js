@@ -795,7 +795,7 @@
   async function drawSheet(build) {
     const canvas = document.getElementById('sh-canvas');
     if (!canvas) return null;
-    await SS.loadFonts('fonts/');
+    await SS.loadFonts();
     const m = sheetModel(build);
     const photo = await imageFrom(loadPhoto(m.id));
     SS.draw(canvas, m, photo, sheetOpts());

@@ -280,9 +280,11 @@ var DealSpecSheet = (function () {
   function loadFonts(base) {
     if (fontsReady) return fontsReady;
     if (typeof FontFace === 'undefined' || typeof document === 'undefined') return (fontsReady = Promise.resolve());
-    const b = base || 'fonts/';
+    // The font files can sit next to taskpane.html or in a fonts folder.
+    const bases = base != null ? [base] : ['', 'fonts/'];
     fontsReady = Promise.all([400, 500, 600, 700, 800].map(w => {
-      const f = new FontFace('Inter', `url(${b}inter-${w}.woff2) format("woff2")`, { weight: String(w) });
+      const src = bases.map(b => `url(${b}inter-${w}.woff2) format("woff2")`).join(', ');
+      const f = new FontFace('Inter', src, { weight: String(w) });
       return f.load().then(ff => { document.fonts.add(ff); }).catch(() => null);
     })).then(() => undefined);
     return fontsReady;
