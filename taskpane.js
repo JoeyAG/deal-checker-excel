@@ -90,7 +90,7 @@
   }
 
   function download(name, text, type) {
-    const url = URL.createObjectURL(new Blob([text], { type: type || 'text/csv;charset=utf-8' }));
+    const url = URL.createObjectURL(text instanceof Blob ? text : new Blob([text], { type: type || 'text/csv;charset=utf-8' }));
     const a = document.createElement('a');
     a.href = url; a.download = name;
     document.body.appendChild(a); a.click(); a.remove();
@@ -116,6 +116,8 @@
       else if (!found.builds && has(h, ['Build ID', 'Missing Parts'])) found.builds = t.name;
       else if (!found.sales && has(h, ['Build / Part ID', 'Sold?', 'Sold Price'])) found.sales = t.name;
       else if (!found.watch && t.name === 'Watchlist') found.watch = t.name;
+      else if (!found.games && has(h, ['Build ID', 'Game', 'Average FPS'])) found.games = t.name;
+      else if (!found.benches && has(h, ['Build ID', 'Benchmark', 'Score'])) found.benches = t.name;
     });
     return found;
   }
@@ -148,6 +150,8 @@
       m.builds = found.builds ? await readTable(ctx, found.builds, false) : null;
       m.sales = found.sales ? await readTable(ctx, found.sales, true) : null;
       m.watch = found.watch ? await readTable(ctx, found.watch, false) : null;
+      m.games = found.games ? await readTable(ctx, found.games, false) : null;
+      m.benches = found.benches ? await readTable(ctx, found.benches, false) : null;
       return m;
     });
   }
@@ -164,6 +168,8 @@
 
   const purchases = () => C.toObjects(model.purchases.headers, model.purchases.values);
   const builds = () => (model.builds ? C.toObjects(model.builds.headers, model.builds.values) : []);
+  const gameRows = () => (model.games ? C.toObjects(model.games.headers, model.games.values) : []);
+  const benchRows = () => (model.benches ? C.toObjects(model.benches.headers, model.benches.values) : []);
   const salesRows = () => (model.sales ? C.toObjects(model.sales.headers, model.sales.values) : []);
 
   // ---------------------------------------------------------------------------
@@ -612,6 +618,7 @@
     const title = ed.title != null ? ed.title : d.title;
     const desc = ed.description != null ? ed.description : d.description;
     const price = ed.price != null ? ed.price : d.price;
+    sheetPrice = typeof price === 'number' && price > 0 ? price : null;
     const saleRow = sales.find(s => SA.idFrom(s['Build / Part ID']) === SA.idFrom(sellId));
     const listed = saleRow && lc(saleRow['Listed?']) === 'y';
     const specText = d.specifics.map(([k, v]) => `${k}: ${v}`).join('\n');
@@ -650,6 +657,8 @@
       </div>
       <div id="s-out"></div>
 
+      ${sheetHtml(build)}
+
       <details class="more"><summary>Pricing and wording settings</summary>
         <div class="field inline"><span>Margin on cost</span><input id="p-margin" type="number" min="0" max="300" value="${p.marginPct}"> %</div>
         <div class="field inline"><span>Windows</span><select id="p-os">${['Windows 11 Home', 'Windows 11 Pro'].map(o => `<option ${o === p.os ? 'selected' : ''}>${o}</option>`).join('')}</select></div>
@@ -680,6 +689,227 @@
     });
     document.getElementById('p-margin').addEventListener('change', async e => { await savePrefs({ marginPct: Math.max(0, +e.target.value || 0) }); delete (sellEdits[sellId] || {}).price; renderSell(); });
     document.getElementById('p-os').addEventListener('change', async e => { await savePrefs({ os: e.target.value }); delete sellEdits[sellId]; renderSell(); });
+    wireSheet(build);
+  }
+
+  // ---- spec sheet image (for the listing photos) ----------------------------------
+
+  const SS = DealSpecSheet;
+  const sheetEdits = {};   // your changes to the specification lines, per build
+  const photoKey = id => 'dealChecker.photo.' + id;
+  const photoCache = {};
+  let sheetPrice = null;   // the price in the Sell tab, shown on the image
+
+  function sheetModel(build) {
+    const p = prefs();
+    const m = SS.model(build, purchases(), benchRows(), gameRows(), { os: p.os, osValue: +p.osValue || 0, price: sheetPrice });
+    const ed = sheetEdits[m.id] || {};
+    m.specs = m.specs.map(r => Object.assign({}, r, { text: ed[r.label] != null ? ed[r.label] : r.text }));
+    return m;
+  }
+
+  const sheetOpts = () => {
+    const p = prefs();
+    const foot = p.sheetFooter != null ? String(p.sheetFooter).split('|').map(x => x.trim()).filter(Boolean) : null;
+    return { showValues: p.sheetValues !== false, footer: foot };
+  };
+
+  function sheetHtml(build) {
+    const m = sheetModel(build);
+    const p = prefs();
+    const missing = [!model.benches && 'Build Benchmarking', !model.games && 'Build Game Testing'].filter(Boolean);
+    const notes = [];
+    if (p.sheetValues !== false && m.unvalued.length) notes.push(`No Estimated Part Value for some ${m.unvalued.join(', ')} parts, so the total leaves them out.`);
+    if (p.sheetValues !== false && m.price && m.totalValue && m.price >= m.totalValue) notes.push(`Your price (£${m.price}) is above the parts’ value (£${m.totalValue}), so no saving is shown. If Windows is activated with a retail licence, adding its value below counts it.`);
+    return `<div class="sheet-sec">
+      <h2><span>Spec sheet image</span></h2>
+      <p class="small muted" style="margin-top:0">A listing photo with the specs, part values, your price, FPS and benchmarks. Benchmarks and FPS come from the
+        ${missing.length ? `<b>${missing.join(' and ')}</b> tables (not found in this workbook)` : '<b>Build Benchmarking</b> and <b>Build Game Testing</b> sheets'}.</p>
+      <div class="photo-row">
+        <label class="file"><input type="file" id="sh-folder" webkitdirectory directory multiple><span class="btn ghost sm">Find photos in a folder…</span></label>
+        <label class="file"><input type="file" id="sh-photo" accept="image/*"><span class="link">${loadPhoto(m.id) ? 'or choose a different photo' : 'or choose one photo'}</span></label>
+        ${loadPhoto(m.id) ? '<button class="link" type="button" id="sh-nophoto">Remove photo</button>' : ''}
+      </div>
+      <p class="small muted">Pick your <b>Computing Business Files</b> folder once: every build folder (“Build 67”, “B69”…) with a <b>Thumbnail.jpg</b> is matched to its build and remembered on this computer.</p>
+      <div id="sh-found"></div>
+      ${notes.map(n => `<div class="warn-box">${esc(n)}</div>`).join('')}
+      <div class="sheet-preview"><canvas id="sh-canvas" aria-label="Spec sheet preview"></canvas></div>
+      <div class="actions">
+        <button class="btn" type="button" id="sh-download">Download image</button>
+        <button class="btn ghost" type="button" id="sh-copy">Copy image</button>
+        <button class="link" type="button" id="sh-place">Put it on a sheet</button>
+      </div>
+      <div id="sh-out"></div>
+      <details class="more"><summary>Image settings and wording</summary>
+        <label class="small"><input type="checkbox" id="sh-values" ${p.sheetValues !== false ? 'checked' : ''}> Show part values, total value and price</label>
+        <div class="field inline"><span>Windows licence value</span>£ <input id="sh-osval" type="number" min="0" step="1" value="${+p.osValue || ''}" placeholder="0"></div>
+        <label class="field"><span>Points along the bottom (separate with |)</span><input id="sh-footer" value="${esc(p.sheetFooter != null ? p.sheetFooter : 'Professionally built | Stress-tested & benchmarked | Windows 11 activated')}"></label>
+        ${m.specs.map(r => `<label class="field"><span>${esc(r.label)}</span><input data-spec="${esc(r.label)}" value="${esc(r.text)}" placeholder="(left off the image when empty)"></label>`).join('')}
+        <button class="link" type="button" id="sh-reset">Reset lines to the sheet’s parts</button>
+      </details>
+      ${!m.benchmarks.length && !m.games.length ? `<p class="small muted">No benchmarks or game results for ${esc(m.id)} yet: add rows with Build ID ${esc(m.id)} to those sheets and click ⟳.</p>` : ''}
+    </div>`;
+  }
+
+  function loadPhoto(id) {
+    if (photoCache[id] !== undefined) return photoCache[id];
+    try { photoCache[id] = localStorage.getItem(photoKey(id)) || null; } catch (e) { photoCache[id] = null; }
+    return photoCache[id];
+  }
+
+  function savePhoto(id, data) {
+    photoCache[id] = data;
+    try { localStorage.setItem(photoKey(id), data); return true; } catch (x) { return false; }   // full: still used this session
+  }
+
+  // Shrinks the photo (long side 1400px) so it can be remembered. The browser turns
+  // phone photos the right way up from their orientation tag.
+  function readPhoto(file) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        const k = Math.min(1, 1400 / Math.max(img.naturalWidth, img.naturalHeight));
+        const c = document.createElement('canvas');
+        c.width = Math.round(img.naturalWidth * k);
+        c.height = Math.round(img.naturalHeight * k);
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url);
+        resolve(c.toDataURL('image/jpeg', 0.86));
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error(`${file.name} isn’t a picture Excel can read. Save it as a JPG or PNG.`)); };
+      img.src = url;
+    });
+  }
+
+  function imageFrom(dataUrl) {
+    return new Promise(resolve => {
+      if (!dataUrl) { resolve(null); return; }
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => resolve(null);
+      img.src = dataUrl;
+    });
+  }
+
+  async function drawSheet(build) {
+    const canvas = document.getElementById('sh-canvas');
+    if (!canvas) return null;
+    await SS.loadFonts('fonts/');
+    const m = sheetModel(build);
+    const photo = await imageFrom(loadPhoto(m.id));
+    SS.draw(canvas, m, photo, sheetOpts());
+    return canvas;
+  }
+
+  const canvasBlob = canvas => new Promise(res => canvas.toBlob(res, 'image/png'));
+
+  // A folder picked with "Find photos in a folder…": every build's Thumbnail.jpg.
+  async function takePhotoFolder(files, current) {
+    const found = SS.findThumbnails(files);
+    const ids = new Set(builds().map(b => String(b['Build ID']).trim()));
+    const mine = Object.keys(found).filter(id => ids.has(id));
+    const box = document.getElementById('sh-found');
+    if (!Object.keys(found).length) {
+      box.innerHTML = '<div class="warn-box">No Thumbnail.jpg found in folders named like “Build 69” or “B69” in that folder.</div>';
+      return;
+    }
+    box.innerHTML = `<div class="small muted">Reading ${mine.length} photo${mine.length === 1 ? '' : 's'}…</div>`;
+    const done = [];
+    const failed = [];
+    let full = false;
+    for (const id of mine) {
+      try {
+        const data = await readPhoto(found[id]);
+        if (!savePhoto(id, data)) full = true;
+        done.push(id);
+      } catch (e) { failed.push(`${id} (${e.message})`); }
+    }
+    const missing = [...ids].filter(id => !found[id]);
+    renderSell();
+    document.getElementById('sh-found').innerHTML = `<div class="ok-box small">Photos found for ${done.length ? esc(done.join(', ')) : 'none of your current builds'}.
+      ${missing.length ? `<br>No Thumbnail.jpg yet for ${esc(missing.join(', '))}.` : ''}${failed.length ? `<br>Couldn’t read ${esc(failed.join('; '))}.` : ''}
+      ${full ? '<br>Too many photos to remember them all on this computer; the rest work until Excel closes.' : ''}</div>`;
+  }
+
+  function wireSheet(build) {
+    const id = String(build['Build ID']).trim();
+    const out = document.getElementById('sh-out');
+    if (!document.getElementById('sh-canvas')) return;
+    drawSheet(build);
+    const redraw = (() => { let t = null; return () => { clearTimeout(t); t = setTimeout(() => drawSheet(build), 250); }; })();
+    document.getElementById('sh-folder').addEventListener('change', e => { if (e.target.files && e.target.files.length) takePhotoFolder(e.target.files, id); });
+    document.getElementById('sh-photo').addEventListener('change', async e => {
+      const f = e.target.files && e.target.files[0];
+      if (!f) return;
+      try { savePhoto(id, await readPhoto(f)); renderSell(); } catch (x) { out.innerHTML = `<div class="err-box">${esc(x.message)}</div>`; }
+    });
+    const rm = document.getElementById('sh-nophoto');
+    if (rm) rm.addEventListener('click', () => { photoCache[id] = null; try { localStorage.removeItem(photoKey(id)); } catch (x) { /* fine */ } renderSell(); });
+    document.getElementById('sh-values').addEventListener('change', async e => { await savePrefs({ sheetValues: e.target.checked }); renderSell(); });
+    document.getElementById('sh-osval').addEventListener('change', async e => { await savePrefs({ osValue: Math.max(0, +e.target.value || 0) }); renderSell(); });
+    document.getElementById('sh-footer').addEventListener('change', async e => { await savePrefs({ sheetFooter: e.target.value }); drawSheet(build); });
+    view.querySelectorAll('[data-spec]').forEach(inp => inp.addEventListener('input', () => {
+      sheetEdits[id] = Object.assign({}, sheetEdits[id], { [inp.dataset.spec]: inp.value });
+      redraw();
+    }));
+    document.getElementById('sh-reset').addEventListener('click', () => { delete sheetEdits[id]; renderSell(); });
+    const priceBox = document.getElementById('s-price');
+    if (priceBox) priceBox.addEventListener('input', () => { sheetPrice = priceBox.value === '' ? null : +priceBox.value; redraw(); });
+    document.getElementById('sh-download').addEventListener('click', async () => {
+      const c = await drawSheet(build);
+      const blob = await canvasBlob(c);
+      try { download(`${id}-spec-sheet.png`, blob); } catch (x) { /* some Excel versions block downloads */ }
+      out.innerHTML = `<div class="ok-box small">Saved <b>${esc(id)}-spec-sheet.png</b> to your Downloads (${c.width} × ${c.height}px). If nothing downloaded, use <b>Copy image</b> or <b>Put it on a sheet</b>.</div>`;
+    });
+    document.getElementById('sh-copy').addEventListener('click', async () => {
+      const c = await drawSheet(build);
+      try {
+        const blob = await canvasBlob(c);
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+        out.innerHTML = '<div class="ok-box small">Copied. Paste it into Paint or Photos and save it from there.</div>';
+      } catch (x) {
+        out.innerHTML = '<div class="err-box small">Excel didn’t allow copying a picture here. Use <b>Put it on a sheet</b> instead.</div>';
+      }
+    });
+    document.getElementById('sh-place').addEventListener('click', async e => {
+      const c = await drawSheet(build);
+      e.target.disabled = true;
+      try {
+        await placeOnSheet(id, c);
+        out.innerHTML = `<div class="ok-box small">Added to the <b>Spec Sheets</b> sheet. Right-click the picture and choose <b>Save as Picture…</b> to save it.</div>`;
+      } catch (x) {
+        out.innerHTML = `<div class="err-box small">${esc(x.message || x)}</div>`;
+      }
+      e.target.disabled = false;
+    });
+  }
+
+  // Puts the image on a "Spec Sheets" worksheet (one picture per build, newest at the bottom).
+  async function placeOnSheet(id, canvas) {
+    if (!Office.context.requirements || !Office.context.requirements.isSetSupported('ExcelApi', '1.9')) {
+      throw new Error('This version of Excel can’t add pictures from the panel. Use Download image or Copy image instead.');
+    }
+    const b64 = canvas.toDataURL('image/png').split(',')[1];
+    await Excel.run(async ctx => {
+      let ws = ctx.workbook.worksheets.getItemOrNullObject('Spec Sheets');
+      await ctx.sync();
+      if (ws.isNullObject) ws = ctx.workbook.worksheets.add('Spec Sheets');
+      const shapes = ws.shapes;
+      shapes.load('items/name,items/top,items/height');
+      await ctx.sync();
+      const name = 'SpecSheet_' + id;
+      shapes.items.filter(sh => sh.name === name).forEach(sh => sh.delete());
+      const others = shapes.items.filter(sh => sh.name !== name);
+      const top = others.reduce((a, sh) => Math.max(a, sh.top + sh.height), 0) + (others.length ? 20 : 10);
+      const pic = shapes.addImage(b64);
+      pic.name = name;
+      pic.left = 10;
+      pic.top = top;
+      pic.width = 600;   // points; keeps its proportions
+      ws.activate();
+      await ctx.sync();
+    });
   }
 
   async function markListed(id, price, btn) {

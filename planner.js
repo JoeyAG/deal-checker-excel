@@ -35,7 +35,7 @@ var DealPlanner = (function () {
   ];
   const KIND_NAME = { cpu: 'CPU', mobo: 'Motherboard', gpu: 'Graphics card', ram: 'RAM', psu: 'PSU', storage: 'Storage', case: 'Case', cooler: 'CPU cooler' };
   const SHEET_CATEGORY = { cpu: 'CPU', mobo: 'Motherboard', gpu: 'GPU', ram: 'RAM', psu: 'PSU', storage: 'Storage', case: 'Case', cooler: 'Cooling' };
-  const CATEGORY_KIND = { cpu: 'cpu', motherboard: 'mobo', gpu: 'gpu', ram: 'ram', psu: 'psu', storage: 'storage', case: 'case', cooling: 'cooler' };
+  const CATEGORY_KIND = { cpu: 'cpu', motherboard: 'mobo', gpu: 'gpu', ram: 'ram', psu: 'psu', storage: 'storage', case: 'case', cooling: 'cooler', 'cpu cooler': 'cooler' };
 
   function missingKinds(text) {
     const out = [];
