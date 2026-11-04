@@ -1,6 +1,6 @@
 /*
- * taskpane.js — connects the Deal Checker panel to your workbook (Office.js).
- * The decisions live in core.js, planner.js, listing.js and sales.js; this file reads
+ * taskpane.js — Rigboard: connects the panel to your Business Tracker workbook (Office.js).
+ * The decisions live in core.js, planner.js, listing.js, sales.js and finance.js; this file reads
  * and writes the tables and draws the panel.
  *
  * Tables are found by their column headings, not their names, so renaming a
@@ -16,6 +16,8 @@
   const SETTINGS_PREFS = 'dealChecker.prefs';
   const HUB_RE = /^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/;
   const SALES_NEW_COLS = ['eBay Fees', 'eBay Order'];
+  const APP_NAME = 'Rigboard';
+  const APP_VERSION = '2.0';
   const gbp = new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' });
   const gbp0 = new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 });
   const money = v => (typeof v === 'number' && Number.isFinite(v) ? gbp.format(v) : '—');
@@ -25,9 +27,13 @@
   const plural = (n, one, many) => `${n} ${n === 1 ? one : (many || one + 's')}`;
   const lc = s => String(s == null ? '' : s).trim().toLowerCase();
 
+  const FI = DealFinance;
   const view = document.getElementById('view');
   const setup = document.getElementById('setup');
-  let tab = 'today';
+  let tab = 'home';
+  let lastTab = 'home';         // where the ⚙ Settings "Done" button goes back to
+  let buildsSeg = 'list';       // Builds: list | shop | alerts
+  let sellSeg = 'listing';      // Sell: listing | photo
   let model = null;
   let pending = null;        // parsed purchases payload waiting for confirmation
   let pendingSales = null;   // eBay sales waiting for confirmation
@@ -161,6 +167,7 @@
       model = await loadModel();
       renderSetup();
       render();
+      autoSync();
     } catch (e) {
       view.innerHTML = `<div class="err-box"><strong>Couldn’t read the workbook</strong><br>${esc(e.message || e)}</div>`;
     }
@@ -279,7 +286,38 @@
   function render() {
     if (!model) return;
     document.querySelectorAll('.tabs button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === tab)));
-    ({ today: renderToday, builds: renderBuilds, shop: renderShop, stock: renderStock, sell: renderSell, watch: renderWatch, import: renderImport }[tab] || renderToday)();
+    document.getElementById('open-settings').setAttribute('aria-pressed', String(tab === 'settings'));
+    ({ home: renderHome, builds: renderBuilds, sell: renderSell, money: renderMoney, import: renderImport, settings: renderSettings }[tab] || renderHome)();
+  }
+
+  function go(nextTab, opts) {
+    if (nextTab !== 'settings') lastTab = nextTab;
+    tab = nextTab;
+    if (opts && opts.builds) buildsSeg = opts.builds;
+    if (opts && opts.sell) sellSeg = opts.sell;
+    if (opts && opts.sellId) sellId = opts.sellId;
+    render();
+    window.scrollTo(0, 0);
+  }
+
+  // Small segmented switch at the top of a tab.
+  const segHtml = (items, cur) => `<div class="seg" role="tablist">${items.map(([k, label, n]) =>
+    `<button type="button" role="tab" data-seg="${k}" aria-selected="${k === cur}">${label}${n ? ` <span class="n">${n}</span>` : ''}</button>`).join('')}</div>`;
+  const wireSeg = set => view.querySelectorAll('[data-seg]').forEach(b => b.addEventListener('click', () => { set(b.dataset.seg); render(); }));
+  // Buttons and links anywhere that jump to another tab: data-go="builds:shop", "sell:photo", "settings"
+  view.addEventListener('click', e => {
+    const b = e.target.closest('[data-go]');
+    if (!b) return;
+    const [t, sub, id] = b.dataset.go.split(':');
+    go(t, t === 'builds' ? { builds: sub } : t === 'sell' ? { sell: sub || 'listing', sellId: id } : null);
+  });
+
+  // Today's money picture, shared by Home and Money.
+  function money2() {
+    const today = C.todaySerial();
+    return FI.overview(purchases(), builds(), salesRows(), {
+      today, feePct: LI.feeShare(salesRows()), deadlines: C.testDeadlines(purchases(), today, estimatedKeys())
+    });
   }
 
   function deadlineRow(d) {
@@ -296,56 +334,231 @@
       <span class="days">${days}</span></button></li>`;
   }
 
-  function renderToday() {
+  // ---- Home: what needs doing, and the headline numbers ----------------------------
+
+  function renderHome() {
     const today = C.todaySerial();
     const list = C.testDeadlines(purchases(), today, estimatedKeys());
     const by = s => list.filter(d => d.status === s);
     const urgent = by('over').length + by('urgent').length;
     const noValue = C.missingValues(purchases()).length;
+    const f = money2();
     const section = (title, items) => items.length ? `<h2><span>${title}</span><span>${items.length}</span></h2><ul class="list">${items.map(deadlineRow).join('')}</ul>` : '';
     const later = by('ok');
+
+    // Next up: the few things worth doing today, each one click away.
+    const toList = f.pipeline.builds.filter(b => !b.listed && ['Built', 'Benchmarked', 'Imaged'].includes(b.stage));
+    let fits = 0;
+    if (model.builds) { try { fits = PL.plan(builds(), purchases()).fromStock; } catch (e) { fits = 0; } }
+    const todo = [];
+    if (urgent) todo.push(`<button class="todo urgent" type="button" data-jump="tests"><b>Test ${plural(urgent, 'part')}</b><span>${by('over').length ? `${by('over').length} past eBay’s 30 days` : 'eBay’s 30 days end this week'}</span></button>`);
+    if (toList.length > 2) {
+      const val = toList.reduce((a, b) => a + (b.profit || 0), 0);
+      todo.push(`<button class="todo" type="button" data-go="sell:listing:${esc(toList[0].id)}"><b>List ${plural(toList.length, 'built PC')}</b><span>${esc(toList.map(b => b.id).join(', '))}${val ? ` · about ${pounds(val)} profit between them` : ''}</span></button>`);
+    } else toList.forEach(b => todo.push(`<button class="todo" type="button" data-go="sell:listing:${esc(b.id)}"><b>List ${esc(b.id)}</b><span>${esc(b.stage.toLowerCase())}${b.price ? ` · ${pounds(b.price)}, about ${pounds(b.profit)} profit` : ' · no price yet'}</span></button>`));
+    if (fits) todo.push(`<button class="todo" type="button" data-go="builds:shop"><b>Use ${plural(fits, 'spare part')}</b><span>already in stock and fit${fits === 1 ? 's' : ''} a build</span></button>`);
+    if (f.pipeline.unpriced.length) todo.push(`<button class="todo" type="button" data-go="money"><b>Price ${plural(f.pipeline.unpriced.length, 'build')}</b><span>${esc(f.pipeline.unpriced.join(', '))} ${f.pipeline.unpriced.length === 1 ? 'has' : 'have'} no Listing Price in Sales</span></button>`);
+    const deals = (hubCache && hubCache.alerts || []).slice(0, 3);
+
     view.innerHTML = `
-      <div class="big">
-        <div class="stat ${urgent ? 'alert' : ''}"><b>${urgent}</b><span>to test within 7 days</span></div>
-        <div class="stat"><b>${list.filter(d => d.status !== 'coming').length}</b><span>untested from eBay</span></div>
+      <div class="kpis">
+        <button class="kpi" type="button" data-go="money"><span>Tied up in stock</span><b>${pounds(f.stock.tiedUp)}</b><small>${pounds(f.stock.inBuilds.cost)} in builds · ${pounds(f.stock.spare.cost)} spare</small></button>
+        <button class="kpi" type="button" data-go="money"><span>Potential profit</span><b class="pos">${pounds(f.pipeline.profit)}</b><small>on ${plural(f.pipeline.priced, 'priced build')}${f.pipeline.feePct ? ' after fees' : ''}</small></button>
       </div>
-      <p class="small muted" style="margin:0 0 4px">eBay gives you 30 days from delivery to report a part not as described. Click a part to find it in the sheet.</p>
+      ${todo.length ? `<h2><span>Next up</span></h2><div class="todos">${todo.join('')}</div>` : '<p class="msg"><strong>All caught up</strong><span class="muted">Nothing to test, list or allocate right now.</span></p>'}
+      ${deals.length ? `<h2><span>Latest deals</span><button class="link small" type="button" data-go="builds:alerts">All alerts</button></h2><ul class="list">${deals.map(dealRow).join('')}</ul>` : ''}
+      <div id="tests">
+      ${list.length ? `<h2 class="sec"><span>Testing deadlines</span><span class="muted small">30 days from delivery</span></h2>` : ''}
       ${section('Past the 30 days', by('over'))}
       ${section('Test within 7 days', by('urgent'))}
       ${section('Within 14 days', by('soon'))}
       ${later.length ? `<details class="more" ${urgent || by('soon').length ? '' : 'open'}><summary>Later (${later.length})</summary><ul class="list">${later.map(deadlineRow).join('')}</ul></details>` : ''}
       ${section('On the way', by('coming'))}
-      ${!list.length ? '<p class="msg"><strong>Nothing waiting to be tested</strong><span class="muted">eBay parts marked Tested? = N will appear here.</span></p>' : ''}
+      </div>
       ${noValue ? `<p class="small muted" style="margin-top:14px">${plural(noValue, 'part has', 'parts have')} no market value yet. Parts you check with the Chrome extension before buying get one automatically.</p>` : ''}`;
     view.querySelectorAll('[data-row]').forEach(b => b.addEventListener('click', () => selectRow(model.purchases.name, +b.dataset.row)));
+    const jump = view.querySelector('[data-jump="tests"]');
+    if (jump) jump.addEventListener('click', () => document.getElementById('tests').scrollIntoView({ behavior: 'smooth' }));
+    if (isHubSet() && !hubCache) loadHub().then(() => { if (tab === 'home') renderHome(); }).catch(() => {});
   }
+
+  const when = ts => (ts ? new Date(ts).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '');
+  const dealRow = a => `<li><div class="row" style="cursor:default">
+      <span><span class="name">${ext(a.url, esc(a.title))}</span><span class="sub">${esc(a.label)} · ${esc(when(a.found))}</span></span>
+      <span class="days">${money(a.total)}<small>alert ≤ ${pounds(a.alertAt)}</small></span></div></li>`;
 
   function noBuilds() {
     view.innerHTML = '<p class="msg"><strong>No Builds table found</strong><span class="muted">It needs columns called “Build ID” and “Missing Parts”.</span></p>';
   }
 
+  // ---- Builds: the builds themselves, what to buy for them, and deal alerts ---------
+
+  function buildsTop() {
+    let toBuy = 0;
+    try { model.plan = PL.plan(builds(), purchases()); toBuy = model.plan.shopping.reduce((a, g) => a + g.count, 0); } catch (e) { toBuy = 0; }
+    const deals = hubCache && hubCache.alerts ? hubCache.alerts.length : 0;
+    return segHtml([['list', 'Builds', builds().filter(b => String(b['Build ID'] || '').trim()).length], ['shop', 'Shopping', toBuy], ['alerts', 'Alerts', deals]], buildsSeg);
+  }
+
   function renderBuilds() {
     if (!model.builds) return noBuilds();
+    if (buildsSeg === 'shop') renderShop();
+    else if (buildsSeg === 'alerts') renderWatch();
+    else renderBuildList();
+    wireSeg(s => { buildsSeg = s; });
+  }
+
+  function renderBuildList() {
     const list = C.buildsSummary(builds(), purchases());
+    const fin = new Map(money2().pipeline.builds.map(b => [b.id, b]));
     const order = { 'Collecting parts': 0, 'All parts in': 1, 'Ready to build': 2, 'Built': 3, 'Benchmarked': 4 };
     list.sort((a, b) => order[a.stage] - order[b.stage] || String(a.id).localeCompare(String(b.id), undefined, { numeric: true }));
-    view.innerHTML = list.map(b => `<button class="build" type="button" data-row="${b.row}">
-        <div class="head"><span class="id">${esc(b.id)}</span><span class="stage">${esc(b.stage)}</span></div>
+    const stages = Object.keys(order).map(s => [s, list.filter(b => b.stage === s).length]);
+    view.innerHTML = buildsTop() + `
+      <div class="pipe">${stages.map(([s, n]) => `<div class="${n ? '' : 'none'}"><b>${n}</b><span>${esc(s)}</span></div>`).join('')}</div>
+      ${list.map(b => {
+        const f = fin.get(b.id);
+        const priceBit = f && f.price ? ` · <b>${pounds(f.price)}</b> ${f.complete ? `<span class="pos">+${pounds(f.profit)}</span>` : `<span title="Still collecting parts, so the profit will drop">(+${pounds(f.profit)} so far)</span>`}` : f ? ' · <span class="warn-text">no price</span>' : ' · sold';
+        return `<button class="build" type="button" data-row="${b.row}">
+        <div class="head"><span class="id">${esc(b.id)}</span><span class="stage">${esc(f && f.listed ? 'Listed' : b.stage)}</span></div>
         <div class="desc">${esc(b.description) || '<span class="muted">No description</span>'}</div>
-        <div class="small muted">${plural(b.parts, 'part')} allocated · ${money(b.cost)}${b.untested ? ` · <span class="tag warn">${b.untested} untested</span>` : ''}${b.waitingOn ? ` · waiting on ${esc(b.waitingOn)}` : ''}</div>
+        <div class="small muted">${plural(b.parts, 'part')} · cost ${pounds(b.cost)}${priceBit}${b.untested ? ` · <span class="tag warn">${b.untested} untested</span>` : ''}${b.waitingOn ? ` · waiting on ${esc(b.waitingOn)}` : ''}</div>
         ${b.missing.length ? `<div class="chips">${b.missing.map(m => `<span class="chip">needs ${esc(m)}</span>`).join('')}</div>` : ''}
-      </button>`).join('') || '<p class="muted">No builds yet.</p>';
+      </button>`;
+      }).join('') || '<p class="muted">No builds yet.</p>'}
+      <p class="small muted">Click a build to find it in the sheet. Prices come from <b>Listing Price</b> in Sales.</p>`;
     view.querySelectorAll('[data-row]').forEach(b => b.addEventListener('click', () => selectRow(model.builds.name, +b.dataset.row)));
   }
 
-  function renderStock() {
-    const g = C.stockSummary(purchases());
-    const tot = g.reduce((a, x) => ({ count: a.count + x.count, cost: a.cost + x.cost, value: a.value + x.value }), { count: 0, cost: 0, value: 0 });
-    view.innerHTML = `<p class="small muted" style="margin:0 0 8px">Parts marked available and not allocated to a build.</p>
-      <table class="grid"><tr><th>Category</th><th class="n">Parts</th><th class="n">Cost</th><th class="n">Value</th></tr>
-      ${g.map(x => `<tr><td>${esc(x.category)}</td><td class="n">${x.count}</td><td class="n">${pounds(x.cost)}</td><td class="n">${x.valued ? pounds(x.value) : '—'}</td></tr>`).join('')}
-      <tr class="total"><td>Total</td><td class="n">${tot.count}</td><td class="n">${pounds(tot.cost)}</td><td class="n">${pounds(tot.value)}</td></tr></table>
-      <p class="small muted">Value only counts parts with an Estimated Part Value.</p>`;
+  // ---------------------------------------------------------------------------
+  // Money: where it is, what it could make, what it has made
+  // ---------------------------------------------------------------------------
+
+  const COL_A = '#2a78d6';   // chart colours (checked for colour-blind separation)
+  const COL_B = '#eb6834';
+
+  function renderMoney() {
+    const f = money2();
+    const st = f.stock;
+    const pipe = f.pipeline;
+    const rz = f.realised;
+    const tm = f.thisMonth || { spend: 0 };
+    const lm = f.lastMonth;
+    const pct = v => (v == null ? '—' : `${Math.round(v)}%`);
+    const pctOf = (a, b) => (b > 0 ? Math.max(0, a / b * 100) : 0);
+
+    // Where the money is: one bar, builds vs spare
+    const split = st.tiedUp > 0 ? `
+      <div class="split" role="img" aria-label="${pounds(st.inBuilds.cost)} in builds, ${pounds(st.spare.cost)} in spare parts">
+        <span style="width:${pctOf(st.inBuilds.cost, st.tiedUp)}%;background:${COL_A}" title="In builds: ${pounds(st.inBuilds.cost)}"></span>
+        <span style="width:${pctOf(st.spare.cost, st.tiedUp)}%;background:${COL_B}" title="Spare parts: ${pounds(st.spare.cost)}"></span>
+      </div>
+      <div class="legend">
+        <div><i style="background:${COL_A}"></i><span>In ${plural(st.inBuilds.builds, 'build')}</span><b>${pounds(st.inBuilds.cost)}</b><small>${st.inBuilds.count} parts · worth ${pounds(st.inBuilds.value)}</small></div>
+        <div><i style="background:${COL_B}"></i><span>Spare parts</span><b>${pounds(st.spare.cost)}</b><small>${st.spare.count} parts · worth ${pounds(st.spare.value)}${st.spare.valued < st.spare.count ? '*' : ''}</small></div>
+      </div>` : '<p class="muted">No stock.</p>';
+
+    const pipeRows = pipe.builds.slice().sort((a, b) => (b.price != null) - (a.price != null) || String(a.id).localeCompare(String(b.id), undefined, { numeric: true }));
+    const buildRow = b => `<tr class="${b.complete ? '' : 'prov'}">
+        <td><b>${esc(b.id)}</b><small>${esc(b.listed ? `Listed${b.listedDays != null ? ` ${b.listedDays}d` : ''}` : b.stage)}</small></td>
+        <td class="n">${pounds(b.cost)}</td>
+        <td class="n">${b.price != null ? pounds(b.price) : `<button class="link small" type="button" data-go="sell:listing:${esc(b.id)}">set</button>`}</td>
+        <td class="n ${b.profit > 0 ? 'pos' : b.profit < 0 ? 'neg' : ''}">${b.profit != null ? (b.complete ? '' : '(') + pounds(b.profit) + (b.complete ? '' : ')') : '—'}</td></tr>`;
+
+    const cats = st.spare.byCategory;
+    const catRow = x => `<tr><td>${esc(x.category)}</td><td class="n">${x.count}</td><td class="n">${pounds(x.cost)}</td><td class="n">${x.valued ? pounds(x.value) : '—'}</td></tr>`;
+
+    view.innerHTML = `
+      <div class="kpis">
+        <div class="kpi"><span>Tied up in stock</span><b>${pounds(st.tiedUp)}</b><small>${plural(st.inBuilds.count + st.spare.count, 'part')} not yet sold</small></div>
+        <div class="kpi"><span>Potential profit</span><b class="pos">${pounds(pipe.feePct ? pipe.profitAfterFees : pipe.profit)}</b><small>${plural(pipe.priced, 'build')} with all parts${pipe.feePct ? `, after ${pipe.feePct}% fees` : ', before fees'}</small></div>
+        <div class="kpi"><span>Profit so far</span><b class="${rz.profit > 0 ? 'pos' : rz.profit < 0 ? 'neg' : ''}">${rz.count ? pounds(rz.profit) : '£0'}</b><small>${rz.count ? `${plural(rz.count, 'sale')} · ${pct(rz.returnPct)} return` : 'No sales recorded yet'}</small></div>
+        <div class="kpi"><span>Spent this month</span><b>${pounds(tm.spend)}</b><small>${lm ? `${esc(lm.label)}: ${pounds(lm.spend)}` : ''}</small></div>
+      </div>
+
+      <h2 class="sec"><span>Where your money is</span></h2>
+      ${split}
+      ${st.spare.valued < st.spare.count ? `<p class="small muted">* ${st.spare.count - st.spare.valued} spare parts have no Estimated Part Value, so the value leaves them out.</p>` : ''}
+
+      <h2 class="sec"><span>Builds</span><span>${pipe.count}</span></h2>
+      ${pipe.count ? `<table class="grid money"><tr><th>Build</th><th class="n">Cost</th><th class="n">Price</th><th class="n">Profit</th></tr>
+        ${pipeRows.map(buildRow).join('')}
+        <tr class="total"><td>${plural(pipe.priced, 'ready build')}</td><td class="n">${pounds(pipe.pricedCost)}</td><td class="n">${pounds(pipe.listValue)}</td><td class="n pos">${pounds(pipe.profit)}</td></tr></table>
+        <p class="small muted">Price is the <b>Listing Price</b> in Sales. Profit is before eBay fees and postage${pipe.feePct && pipe.priced ? ` (your sales so far average ${pipe.feePct}% fees, which would leave ${pounds(pipe.profitAfterFees)})` : ''}.
+          ${pipe.provisional.length ? `Figures in brackets are for builds still collecting parts (${esc(pipe.provisional.join(', '))}): their profit drops as you buy the rest, so they’re not in the total.` : ''}
+          ${pipe.marginPct != null ? `Ready builds are priced at ${Math.round(pipe.marginPct)}% over cost on average.` : ''}</p>` : '<p class="muted">No unsold builds.</p>'}
+      ${pipe.parts.length ? `<details class="more"><summary>Parts for sale on their own (${pipe.parts.length})</summary><table class="grid money"><tr><th>Part</th><th class="n">Cost</th><th class="n">Price</th><th class="n">Profit</th></tr>
+        ${pipe.parts.map(p => `<tr><td><b>${esc(p.id)}</b><small>${esc(p.description.slice(0, 40))}</small></td><td class="n">${pounds(p.cost)}</td><td class="n">${pounds(p.price)}</td><td class="n">${p.profit != null ? pounds(p.profit) : '—'}</td></tr>`).join('')}</table></details>` : ''}
+
+      <h2 class="sec"><span>Sales</span><span>${rz.count || ''}</span></h2>
+      ${rz.count ? `<table class="grid money">
+          <tr><td>Sold for</td><td class="n">${money(rz.revenue)}</td></tr>
+          <tr><td>Cost of what sold</td><td class="n">− ${money(rz.cost)}</td></tr>
+          ${rz.fees.ebay ? `<tr><td class="ind">eBay fees</td><td class="n">− ${money(rz.fees.ebay)}</td></tr>` : ''}
+          ${rz.fees.promo ? `<tr><td class="ind">Promoted listings</td><td class="n">− ${money(rz.fees.promo)}</td></tr>` : ''}
+          ${rz.fees.postage ? `<tr><td class="ind">Postage</td><td class="n">− ${money(rz.fees.postage)}</td></tr>` : ''}
+          ${rz.fees.materials ? `<tr><td class="ind">Packaging</td><td class="n">− ${money(rz.fees.materials)}</td></tr>` : ''}
+          <tr class="total"><td>Profit</td><td class="n ${rz.profit >= 0 ? 'pos' : 'neg'}">${money(rz.profit)}</td></tr></table>
+        <div class="minis">
+          <div><b>${pct(rz.returnPct)}</b><span>return on cost</span></div>
+          <div><b>${pounds(rz.avgProfit)}</b><span>profit per sale</span></div>
+          <div><b>${rz.avgDaysToSell != null ? rz.avgDaysToSell + 'd' : '—'}</b><span>listed to sold</span></div>
+        </div>
+        ${rz.byVia.length > 1 ? `<p class="small muted">${rz.byVia.map(v => `${esc(v.via)}: ${plural(v.count, 'sale')}, ${pounds(v.profit)} profit`).join(' · ')}</p>` : ''}
+        <p class="small muted">Profit uses your Sales sheet’s Profit column where it’s filled in.</p>`
+        : `<p class="small muted">Nothing marked sold yet. When something sells, record it on the <button class="link" type="button" data-go="import">Import</button> tab from eBay’s report (or set <b>Sold?</b> to Y in Sales) and revenue, fees and profit show here.</p>`}
+
+      <h2 class="sec"><span>Last ${f.months.length} months</span></h2>
+      ${monthsChart(f.months)}
+
+      <h2 class="sec"><span>Spare parts by category</span><span>${st.spare.count}</span></h2>
+      <table class="grid money"><tr><th>Category</th><th class="n">Parts</th><th class="n">Cost</th><th class="n">Value</th></tr>
+        ${cats.slice(0, 6).map(catRow).join('')}
+        ${cats.length > 6 ? `<tr class="fold"><td colspan="4"><details><summary>${cats.length - 6} more categories</summary><table class="grid inner">${cats.slice(6).map(catRow).join('')}</table></details></td></tr>` : ''}
+        <tr class="total"><td>Total</td><td class="n">${st.spare.count}</td><td class="n">${pounds(st.spare.cost)}</td><td class="n">${pounds(st.spare.value)}</td></tr></table>
+
+      <h2 class="sec"><span>Worth a look</span></h2>
+      <ul class="notes">
+        ${f.risk.over.count || f.risk.urgent.count ? `<li class="bad"><b>${pounds(f.risk.over.cost + f.risk.urgent.cost)} untested</b> near or past eBay’s 30 days: ${f.risk.over.count ? `${plural(f.risk.over.count, 'part')} (${pounds(f.risk.over.cost)}) past` : ''}${f.risk.over.count && f.risk.urgent.count ? ', ' : ''}${f.risk.urgent.count ? `${plural(f.risk.urgent.count, 'part')} (${pounds(f.risk.urgent.cost)}) due this week` : ''}. <button class="link" type="button" data-go="home">See them</button></li>` : ''}
+        ${st.agedTotal.count ? `<li class="warn"><b>${pounds(st.agedTotal.cost)} in older spare parts</b>: ${plural(st.agedTotal.count, 'part')} bought ${st.agedDays}+ days ago and not in a build.
+          <details><summary>Oldest</summary><ul class="plain">${st.aged.slice(0, 8).map(a => `<li>${esc(a.partId)} ${esc(a.name)} <span class="muted">· ${a.days}d · ${pounds(a.cost)}</span></li>`).join('')}</ul></details></li>` : ''}
+        ${f.elsewhere.count ? `<li><b>${pounds(f.elsewhere.cost)} spent on parts that aren’t stock</b> (faulty, returned, tools, upgrades for others):
+          <ul class="plain">${f.elsewhere.groups.slice(0, 5).map(g => `<li>${esc(g.reason)}: ${pounds(g.cost)} <span class="muted">(${plural(g.count, 'part')})</span></li>`).join('')}</ul></li>` : ''}
+        ${f.buying.underPct != null ? `<li class="good"><b>You buy ${Math.round(f.buying.underPct)}% under market value</b> on average: ${pounds(f.buying.under)} below value across ${plural(f.buying.valued, 'valued part')}.</li>` : ''}
+        <li class="muted small">All-time: ${pounds(f.buying.spent)} spent on ${plural(f.buying.parts, 'part')}${rz.count ? `, ${pounds(rz.revenue)} back from sales` : ''}.</li>
+      </ul>`;
+  }
+
+  // Spend vs sales per month: grouped columns, one axis.
+  function monthsChart(months) {
+    if (!months.length) return '';
+    const max = Math.max(1, ...months.map(m => Math.max(m.spend, m.revenue)));
+    const step = [50, 100, 250, 500, 1000, 2500, 5000, 10000].find(s => max / s <= 4) || 25000;
+    const top = Math.ceil(max / step) * step;
+    const W = 320, H = 150, L = 36, B = 20, T = 8, plotH = H - B - T, slot = (W - L) / months.length, bw = Math.min(14, slot / 2 - 4);
+    const y = v => T + plotH - v / top * plotH;
+    const bar = (x, v, col, label) => {
+      if (v <= 0) return '';
+      const h = Math.max(2, v / top * plotH), r = Math.min(3, h / 2), yy = T + plotH - h;
+      return `<path d="M${x},${T + plotH}V${yy + r}Q${x},${yy} ${x + r},${yy}H${x + bw - r}Q${x + bw},${yy} ${x + bw},${yy + r}V${T + plotH}Z" fill="${col}"><title>${esc(label)}</title></path>`;
+    };
+    const ticks = [];
+    for (let v = 0; v <= top; v += step) ticks.push(v);
+    const hasSales = months.some(m => m.revenue > 0);
+    return `<div class="chart">
+      <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Spending${hasSales ? ' and sales' : ''} per month">
+        ${ticks.map(v => `<line x1="${L}" x2="${W}" y1="${y(v)}" y2="${y(v)}" class="grid-l"/><text x="${L - 5}" y="${y(v) + 3.5}" text-anchor="end" class="ax">${v >= 1000 ? '£' + v / 1000 + 'k' : '£' + v}</text>`).join('')}
+        ${months.map((m, i) => {
+          const cx = L + slot * i + slot / 2;
+          return bar(cx - bw - 1, m.spend, COL_A, `${m.label} ${m.year}: spent ${pounds(m.spend)} on ${plural(m.bought, 'part')}`) +
+            bar(cx + 1, m.revenue, COL_B, `${m.label} ${m.year}: sold ${pounds(m.revenue)} (${plural(m.soldCount, 'sale')}), profit ${pounds(m.profit)}`) +
+            `<text x="${cx}" y="${H - 5}" text-anchor="middle" class="ax">${m.label}</text>`;
+        }).join('')}
+      </svg>
+      <div class="legend row"><div><i style="background:${COL_A}"></i><span>Spent on parts</span></div><div><i style="background:${COL_B}"></i><span>Sales</span></div></div>
+      <details class="more"><summary>As a table</summary><table class="grid money"><tr><th>Month</th><th class="n">Spent</th><th class="n">Sales</th><th class="n">Profit</th></tr>
+        ${months.map(m => `<tr><td>${m.label} ${m.year}</td><td class="n">${pounds(m.spend)}</td><td class="n">${pounds(m.revenue)}</td><td class="n">${m.soldCount ? pounds(m.profit) : '—'}</td></tr>`).join('')}</table></details>
+    </div>`;
   }
 
   // ---------------------------------------------------------------------------
@@ -355,22 +568,21 @@
   const KIND = PL.KIND_NAME;
 
   function renderShop() {
-    if (!model.builds) return noBuilds();
-    const plan = PL.plan(builds(), purchases());
-    model.plan = plan;
+    const top = buildsTop();
+    const plan = model.plan;
     const stockBuilds = plan.builds.filter(b => b.needs.some(n => n.stock));
     const toBuy = plan.shopping.reduce((a, g) => a + g.count, 0);
     const watched = new Map(((hubCache && hubCache.watches) || []).map(w => [lc(w.label), w]));
     const hubOn = isHubSet();
 
-    view.innerHTML = `
+    const autoOn = hubOn && prefs().autoAlerts;
+    view.innerHTML = top + `
       <div class="big">
-        <div class="stat"><b>${plan.fromStock}</b><span>parts in stock fit a build</span></div>
+        <div class="stat"><b>${plan.fromStock}</b><span>spare parts fit a build</span></div>
         <div class="stat"><b>${toBuy}</b><span>parts still to buy</span></div>
       </div>
-      <p class="small muted" style="margin:0 0 4px">From each build’s <b>Missing Parts</b>, its CPU or board, and your unallocated stock. Builds with no CPU or board yet are planned around ${esc(PL.PLATFORMS.lga1151v2.cpu)} unless stock suggests otherwise.</p>
-
-      ${autoHtml(plan)}
+      <p class="small muted" style="margin:0 0 4px">Worked out from each build’s <b>Missing Parts</b>, its CPU or board, and your spare stock.
+        ${autoOn ? '<span class="tag">automatic alerts on</span>' : `<button class="link" type="button" data-go="builds:alerts">${hubOn ? 'Turn on automatic alerts' : 'Get deal alerts for these'}</button>`}</p>
 
       <h2><span>To buy</span><span>${plan.shopping.length}</span></h2>
       ${plan.shopping.length ? `<ul class="list">${plan.shopping.map((g, i) => {
@@ -384,7 +596,6 @@
             <button class="btn sm" type="button" data-addwatch="${i}">Add</button><span class="small" id="wr-${i}"></span></span></span>
           </div></li>`;
       }).join('')}</ul>` : '<p class="muted">Nothing to buy: stock covers every build’s missing parts.</p>'}
-      ${!hubOn && plan.shopping.length ? '<p class="small muted">To get phone alerts for these, connect your Deal Alerts sheet on the <b>Watch</b> tab.</p>' : ''}
 
       <h2><span>Use from stock</span><span>${stockBuilds.length}</span></h2>
       ${stockBuilds.map(b => `<div class="build" style="cursor:default">
@@ -404,15 +615,14 @@
       </details>`;
 
     view.querySelectorAll('[data-watch]').forEach(b => b.addEventListener('click', () => {
-      if (!isHubSet()) { tab = 'watch'; render(); return; }
+      if (!isHubSet()) { go('settings'); return; }
       const f = document.getElementById('wf-' + b.dataset.watch);
       f.hidden = !f.hidden;
       if (!f.hidden) f.querySelector('input').focus();
     }));
     view.querySelectorAll('[data-addwatch]').forEach(b => b.addEventListener('click', () => addShopWatch(plan.shopping[+b.dataset.addwatch], +b.dataset.addwatch)));
     view.querySelectorAll('[data-alloc]').forEach(b => b.addEventListener('click', () => allocateBuild(b.dataset.alloc, b)));
-    wireAuto(plan);
-    if (hubOn && !hubCache) loadHub().then(() => { if (tab === 'shop') renderShop(); }).catch(() => {});
+    if (hubOn && !hubCache) loadHub().then(() => { if (tab === 'builds') render(); }).catch(() => {});
   }
 
   // ---- automatic alerts for builds --------------------------------------------
@@ -439,7 +649,6 @@
   }
 
   function autoHtml(plan) {
-    if (!isHubSet()) return `<div class="auto"><b>Automatic alerts for builds</b><div class="small muted">Connect your Deal Alerts sheet on the <b>Watch</b> tab, and the sheet will look for CPU + board bundles, CPUs and graphics cards that suit each build.</div></div>`;
     const auto = autoFor(plan);
     const p = prefs();
     const on = !!p.autoAlerts;
@@ -450,9 +659,7 @@
           <details class="opts"><summary>${n.type === 'gpu' ? PRS.acceptableGpus(n.cpu).length + ' cards that suit it' : PRS.acceptableCpus(n.gpu, { ddr: n.ddr, platform: n.platform }).length + ' CPUs that pair well'}${n.type === 'combo' ? ', with any board that fits' : ''}</summary>${optionsHtml(n)}</details></li>`).join('')}
           ${auto.parts.map(g => `<li>${esc(g.label)} <span class="muted">×${g.count}</span></li>`).join('')}</ul>`
         : '<div class="small muted">Nothing to look for: stock covers every build.</div>'}
-      <div class="pct-row small">Alert when a CPU + board bundle is at least <input type="number" id="pct-bundle" min="5" max="80" value="${hubSettings().bundlePct}" aria-label="Bundle percentage">% under its parts’ value,
-        and a single CPU or card at least <input type="number" id="pct-part" min="5" max="80" value="${hubSettings().partPct}" aria-label="Single part percentage">% under. <button class="link" type="button" id="pct-save">Save</button></div>
-      <div class="small muted">Parts are valued from your purchase history, then from sold prices the Chrome extension collects while you browse eBay.</div>
+      <div class="small muted">Alerts when a CPU + board bundle is ${hubSettings().bundlePct}% or more under its parts’ value, or a single CPU or card ${hubSettings().partPct}% under (<button class="link" type="button" data-go="settings">change</button>). Values come from your purchase history and the sold prices the Chrome extension collects.</div>
       <div class="actions" style="margin-top:6px">
         ${on ? `<button class="btn sm ghost" type="button" id="auto-update">Update now</button><button class="link" type="button" id="auto-off">Turn off</button>`
           : `<button class="btn sm" type="button" id="auto-on" ${count ? '' : 'disabled'}>Turn on automatic alerts</button>`}
@@ -466,18 +673,6 @@
 
   function wireAuto(plan) {
     if (!isHubSet()) return;
-    const save = document.getElementById('pct-save');
-    if (save) save.addEventListener('click', async () => {
-      const b = +document.getElementById('pct-bundle').value;
-      const pp = +document.getElementById('pct-part').value;
-      if (!(b >= 5 && b <= 80 && pp >= 5 && pp <= 80)) { document.getElementById('auto-msg').textContent = 'Use a number between 5 and 80.'; return; }
-      save.textContent = 'Saving…';
-      try {
-        hubCache = await hubCall({ action: 'settings.put', bundlePct: b, partPct: pp });
-        autoMsg = `Saved: bundles ${hubSettings().bundlePct}% under, single parts ${hubSettings().partPct}% under.`;
-      } catch (e) { autoMsg = e.message || String(e); }
-      renderShop();
-    });
     const go = () => pushAuto(plan, true);
     const on = document.getElementById('auto-on');
     const upd = document.getElementById('auto-update');
@@ -485,10 +680,17 @@
     if (on) on.addEventListener('click', go);
     if (upd) upd.addEventListener('click', go);
     if (off) off.addEventListener('click', () => pushAuto(plan, false));
-    // Keep the sheet in step as builds change: when automatic alerts are on and the needs moved on.
+  }
+
+  // Keeps the alerts sheet in step as builds change (after every refresh), whichever tab is open.
+  function autoSync() {
+    if (!model || !model.builds || !isHubSet() || autoBusy) return;
     const p = prefs();
+    if (!p.autoAlerts) return;
+    let plan;
+    try { plan = PL.plan(builds(), purchases()); } catch (e) { return; }
     const h = autoFor(plan).hash;
-    if (p.autoAlerts && !autoBusy && h !== p.autoHash && h !== autoTried) { autoTried = h; pushAuto(plan, true, true); }
+    if (h !== p.autoHash && h !== autoTried) { autoTried = h; pushAuto(plan, true, true); }
   }
 
   async function pushAuto(plan, turnOn, quiet) {
@@ -520,7 +722,7 @@
     } finally {
       autoBusy = false;
     }
-    if (tab === 'shop' && !(quiet && !autoMsg)) renderShop();
+    if (tab === 'builds' && !(quiet && !autoMsg)) render();
   }
 
   const watchLabel = g => (g.item.cat === 'generic' ? g.label : DealSpecs.label(g.item));
@@ -534,7 +736,7 @@
       if (entry.alertAt == null) { out.textContent = ' Enter an alert price (there’s no past price for this yet).'; return; }
       hubCache = await hubCall({ action: 'put', watches: [entry] });
       out.textContent = ' Added. You’ll get a notification when one is listed at or under this.';
-      setTimeout(() => { if (tab === 'shop') renderShop(); }, 1200);
+      setTimeout(() => { if (tab === 'builds') render(); }, 1200);
     } catch (e) {
       out.textContent = ' ' + (e.message || e);
     }
@@ -585,7 +787,7 @@
         }
       });
       await refresh();
-      tab = 'shop';
+      tab = 'builds'; buildsSeg = 'shop';
       render();
       const msg = document.createElement('div');
       msg.className = 'ok-box';
@@ -616,21 +818,34 @@
     const d = LI.draft(build, purchases(), { marginPct: p.marginPct, os: p.os, feePct: fee || 0 });
     const ed = sellEdits[sellId] || {};
     const title = ed.title != null ? ed.title : d.title;
-    const desc = ed.description != null ? ed.description : d.description;
-    const price = ed.price != null ? ed.price : d.price;
-    sheetPrice = typeof price === 'number' && price > 0 ? price : null;
     const saleRow = sales.find(s => SA.idFrom(s['Build / Part ID']) === SA.idFrom(sellId));
+    // Price: your edit, else the Listing Price in Sales, else the suggestion.
+    const listedPrice = saleRow && typeof saleRow['Listing Price'] === 'number' && saleRow['Listing Price'] > 0 ? saleRow['Listing Price'] : null;
+    const price = ed.price != null ? ed.price : (listedPrice || d.price);
+    // The image always shows the Sales sheet's Listing Price when there is one.
+    sheetPrice = listedPrice || (typeof price === 'number' && price > 0 ? price : null);
+    sheetPriceFrom = listedPrice ? 'sales' : 'panel';
+    const desc = ed.description != null ? ed.description : buildDescription(build, d, sheetPrice);
     const listed = saleRow && lc(saleRow['Listed?']) === 'y';
     const specText = d.specifics.map(([k, v]) => `${k}: ${v}`).join('\n');
     const opt = b => `<option value="${esc(b['Build ID'])}" ${b['Build ID'] === sellId ? 'selected' : ''}>${esc(b['Build ID'])} · ${esc(String(b['Build Description'] || '').slice(0, 40))}</option>`;
 
-    view.innerHTML = `
-      <label class="field"><span>Build</span><select id="sell-pick">
+    const head = `
+      <label class="field pick"><span>Build</span><select id="sell-pick">
         ${ready.length ? `<optgroup label="Built, not sold">${ready.map(opt).join('')}</optgroup>` : ''}
         ${rest.length ? `<optgroup label="Still being built">${rest.map(opt).join('')}</optgroup>` : ''}
       </select></label>
+      ${segHtml([['listing', 'Listing'], ['photo', 'Spec sheet image']], sellSeg)}
       ${d.missing.length ? `<div class="warn-box">No ${esc(d.missing.join(', '))} found for ${esc(sellId)}. Allocate the parts in Purchases &amp; Parts (or add them to the Build Description) and the draft fills in.</div>` : ''}
-      ${listed ? `<div class="ok-box small">Listed on ${esc(saleRow['Listed Date'] ? nice(C.serialToIso(saleRow['Listed Date'])) : '?')} at ${money(saleRow['Listing Price'])}.</div>` : ''}
+      ${listed ? `<div class="ok-box small" style="margin:0 0 10px">Listed on ${esc(saleRow['Listed Date'] ? nice(C.serialToIso(saleRow['Listed Date'])) : '?')} at ${money(saleRow['Listing Price'])}.</div>` : ''}`;
+    if (sellSeg === 'photo') {
+      view.innerHTML = head + sheetHtml(build);
+      document.getElementById('sell-pick').addEventListener('change', e => { sellId = e.target.value; renderSell(); });
+      wireSeg(x => { sellSeg = x; });
+      wireSheet(build);
+      return;
+    }
+    view.innerHTML = head + `
 
       <div class="field"><span>Title <small class="muted" id="t-count">${title.length}/80</small></span>
         <div class="with-btn"><input id="s-title" maxlength="80" value="${esc(title)}"><button class="btn ghost sm" type="button" data-copy="title">Copy</button></div></div>
@@ -641,7 +856,7 @@
 
       <div class="field"><span>Price</span>
         <div class="with-btn"><span class="pfx">£</span><input id="s-price" type="number" min="1" step="1" value="${price == null ? '' : price}"><button class="btn ghost sm" type="button" data-copy="price">Copy</button></div>
-        <small class="muted">Cost ${money(d.cost)} + ${p.marginPct}% margin${fee ? ` + ${fee}% fees` : ''} → ${pounds(d.priceFromCost)}${d.priceFromValue ? ` · parts’ market value → ${pounds(d.priceFromValue)}${d.partsValue.missing ? ` (${d.partsValue.missing} part${d.partsValue.missing === 1 ? '' : 's'} unvalued)` : ''}` : ''}${d.similarUrl ? ` · ${ext(d.similarUrl, 'similar PCs sold')}` : ''}</small></div>
+        <small class="muted">${listedPrice && ed.price == null ? `From Listing Price in Sales. ` : ''}Cost ${money(d.cost)} + ${p.marginPct}% margin${fee ? ` + ${fee}% fees` : ''} → ${pounds(d.priceFromCost)}${d.priceFromValue ? ` · parts’ value → ${pounds(d.priceFromValue)}` : ''}${typeof price === 'number' && price > 0 ? ` · profit ${pounds(price - d.cost)}` : ''}${d.similarUrl ? ` · ${ext(d.similarUrl, 'similar PCs sold')}` : ''}</small></div>
 
       <div class="field"><span>Item specifics <button class="link" type="button" data-copy="specs">Copy all</button></span>
         <table class="grid specs">${d.specifics.map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join('')}</table>
@@ -656,17 +871,11 @@
         <button class="link" type="button" id="s-reset">Reset draft</button>
       </div>
       <div id="s-out"></div>
-
-      ${sheetHtml(build)}
-
-      <details class="more"><summary>Pricing and wording settings</summary>
-        <div class="field inline"><span>Margin on cost</span><input id="p-margin" type="number" min="0" max="300" value="${p.marginPct}"> %</div>
-        <div class="field inline"><span>Windows</span><select id="p-os">${['Windows 11 Home', 'Windows 11 Pro'].map(o => `<option ${o === p.os ? 'selected' : ''}>${o}</option>`).join('')}</select></div>
-        <p class="small muted">${fee ? `Fees: ${fee}% of the sale price on average, from your recorded eBay sales.` : 'Fees: none allowed for yet. Once you record eBay sales (Import tab), the average fee is added automatically.'}</p>
-      </details>`;
+      <p class="small muted">Description wording, margin and Windows edition are in <button class="link" type="button" data-go="settings">Settings</button>.</p>`;
 
     const keep = (k, v) => { sellEdits[sellId] = Object.assign({}, sellEdits[sellId], { [k]: v }); };
     document.getElementById('sell-pick').addEventListener('change', e => { sellId = e.target.value; renderSell(); });
+    wireSeg(x => { sellSeg = x; });
     const t = document.getElementById('s-title');
     t.addEventListener('input', () => { keep('title', t.value); document.getElementById('t-count').textContent = `${t.value.length}/80`; });
     const pr = document.getElementById('s-price');
@@ -687,9 +896,6 @@
         If nothing downloaded, <button class="link" type="button" id="s-csv-copy">copy the file’s text</button> into Notepad and save it as a .csv.</div>`;
       document.getElementById('s-csv-copy').addEventListener('click', ev => copyText(csv, ev.target));
     });
-    document.getElementById('p-margin').addEventListener('change', async e => { await savePrefs({ marginPct: Math.max(0, +e.target.value || 0) }); delete (sellEdits[sellId] || {}).price; renderSell(); });
-    document.getElementById('p-os').addEventListener('change', async e => { await savePrefs({ os: e.target.value }); delete sellEdits[sellId]; renderSell(); });
-    wireSheet(build);
   }
 
   // ---- spec sheet image (for the listing photos) ----------------------------------
@@ -698,7 +904,18 @@
   const sheetEdits = {};   // your changes to the specification lines, per build
   const photoKey = id => 'dealChecker.photo.' + id;
   const photoCache = {};
-  let sheetPrice = null;   // the price in the Sell tab, shown on the image
+  let sheetPrice = null;      // the price shown on the image
+  let sheetPriceFrom = 'panel';
+
+  // The listing description from your template (or the default).
+  function buildDescription(build, d, price) {
+    const m = SS.model(build, purchases(), benchRows(), gameRows(), { os: prefs().os, osValue: +prefs().osValue || 0, price });
+    const vars = LI.descriptionVars(d.parts, {
+      os: prefs().os, title: (sellEdits[d.id] || {}).title || d.title, buildId: d.id,
+      games: m.games, benchmarks: m.benchmarks, price, partsValue: m.totalValue
+    });
+    return LI.fillTemplate(prefs().descTemplate || LI.DEFAULT_TEMPLATE, vars);
+  }
 
   function sheetModel(build) {
     const p = prefs();
@@ -720,32 +937,29 @@
     const missing = [!model.benches && 'Build Benchmarking', !model.games && 'Build Game Testing'].filter(Boolean);
     const notes = [];
     if (p.sheetValues !== false && m.unvalued.length) notes.push(`No Estimated Part Value for some ${m.unvalued.join(', ')} parts, so the total leaves them out.`);
-    if (p.sheetValues !== false && m.price && m.totalValue && m.price >= m.totalValue) notes.push(`Your price (£${m.price}) is above the parts’ value (£${m.totalValue}), so no saving is shown. If Windows is activated with a retail licence, adding its value below counts it.`);
+    if (p.sheetValues !== false && m.price && m.totalValue && m.price >= m.totalValue) notes.push(`Your price (£${m.price}) is above the parts’ value (£${m.totalValue}), so no saving is shown. If Windows is activated with a retail licence, adding its value in Settings counts it.`);
     return `<div class="sheet-sec">
-      <h2><span>Spec sheet image</span></h2>
-      <p class="small muted" style="margin-top:0">A listing photo with the specs, part values, your price, FPS and benchmarks. Benchmarks and FPS come from the
-        ${missing.length ? `<b>${missing.join(' and ')}</b> tables (not found in this workbook)` : '<b>Build Benchmarking</b> and <b>Build Game Testing</b> sheets'}.</p>
       <div class="photo-row">
         <label class="file"><input type="file" id="sh-folder" webkitdirectory directory multiple><span class="btn ghost sm">Find photos in a folder…</span></label>
         <label class="file"><input type="file" id="sh-photo" accept="image/*"><span class="link">${loadPhoto(m.id) ? 'or choose a different photo' : 'or choose one photo'}</span></label>
         ${loadPhoto(m.id) ? '<button class="link" type="button" id="sh-nophoto">Remove photo</button>' : ''}
       </div>
-      <p class="small muted">Pick your <b>Computing Business Files</b> folder once: every build folder (“Build 67”, “B69”…) with a <b>Thumbnail.jpg</b> is matched to its build and remembered on this computer.</p>
+      ${loadPhoto(m.id) ? '' : '<p class="small muted">Pick your <b>Computing Business Files</b> folder once: every build folder (“Build 67”, “B69”…) with a <b>Thumbnail.jpg</b> is matched to its build and remembered on this computer.</p>'}
       <div id="sh-found"></div>
       ${notes.map(n => `<div class="warn-box">${esc(n)}</div>`).join('')}
       <div class="sheet-preview"><canvas id="sh-canvas" aria-label="Spec sheet preview"></canvas></div>
+      <p class="small muted">${sheetPrice ? (sheetPriceFrom === 'sales' ? `Price on the image: £${Math.round(sheetPrice)}, the Listing Price for ${esc(m.id)} in Sales.` : `${esc(m.id)} has no Listing Price in Sales yet, so the image uses the Listing tab’s price (£${Math.round(sheetPrice)}). <b>Mark as listed</b> saves it to Sales.`) : 'No price yet: set one on the Listing tab or in Sales.'}
+        ${missing.length ? ` Benchmarks and FPS come from the <b>${missing.join(' and ')}</b> tables, which aren’t in this workbook.` : ''}</p>
       <div class="actions">
         <button class="btn" type="button" id="sh-download">Download image</button>
         <button class="btn ghost" type="button" id="sh-copy">Copy image</button>
         <button class="link" type="button" id="sh-place">Put it on a sheet</button>
       </div>
       <div id="sh-out"></div>
-      <details class="more"><summary>Image settings and wording</summary>
-        <label class="small"><input type="checkbox" id="sh-values" ${p.sheetValues !== false ? 'checked' : ''}> Show part values, total value and price</label>
-        <div class="field inline"><span>Windows licence value</span>£ <input id="sh-osval" type="number" min="0" step="1" value="${+p.osValue || ''}" placeholder="0"></div>
-        <label class="field"><span>Points along the bottom (separate with |)</span><input id="sh-footer" value="${esc(p.sheetFooter != null ? p.sheetFooter : 'Professionally built | Stress-tested & benchmarked | Windows 11 activated')}"></label>
+      <details class="more"><summary>Edit the lines on the image</summary>
         ${m.specs.map(r => `<label class="field"><span>${esc(r.label)}</span><input data-spec="${esc(r.label)}" value="${esc(r.text)}" placeholder="(left off the image when empty)"></label>`).join('')}
         <button class="link" type="button" id="sh-reset">Reset lines to the sheet’s parts</button>
+        <p class="small muted">Values, the Windows licence and the points along the bottom are in <button class="link" type="button" data-go="settings">Settings</button>.</p>
       </details>
       ${!m.benchmarks.length && !m.games.length ? `<p class="small muted">No benchmarks or game results for ${esc(m.id)} yet: add rows with Build ID ${esc(m.id)} to those sheets and click ⟳.</p>` : ''}
     </div>`;
@@ -846,16 +1060,11 @@
     });
     const rm = document.getElementById('sh-nophoto');
     if (rm) rm.addEventListener('click', () => { photoCache[id] = null; try { localStorage.removeItem(photoKey(id)); } catch (x) { /* fine */ } renderSell(); });
-    document.getElementById('sh-values').addEventListener('change', async e => { await savePrefs({ sheetValues: e.target.checked }); renderSell(); });
-    document.getElementById('sh-osval').addEventListener('change', async e => { await savePrefs({ osValue: Math.max(0, +e.target.value || 0) }); renderSell(); });
-    document.getElementById('sh-footer').addEventListener('change', async e => { await savePrefs({ sheetFooter: e.target.value }); drawSheet(build); });
     view.querySelectorAll('[data-spec]').forEach(inp => inp.addEventListener('input', () => {
       sheetEdits[id] = Object.assign({}, sheetEdits[id], { [inp.dataset.spec]: inp.value });
       redraw();
     }));
     document.getElementById('sh-reset').addEventListener('click', () => { delete sheetEdits[id]; renderSell(); });
-    const priceBox = document.getElementById('s-price');
-    if (priceBox) priceBox.addEventListener('input', () => { sheetPrice = priceBox.value === '' ? null : +priceBox.value; redraw(); });
     document.getElementById('sh-download').addEventListener('click', async () => {
       const c = await drawSheet(build);
       const blob = await canvasBlob(c);
@@ -938,7 +1147,7 @@
         }
       });
       await refresh();
-      tab = 'sell';
+      tab = 'sell'; sellSeg = 'listing';
       render();
       document.getElementById('s-out').innerHTML = `<div class="ok-box small">${esc(id)} ${added ? 'added to' : 'updated in'} Sales: listed today at ${money(price)}.</div>`;
     } catch (e) {
@@ -955,7 +1164,7 @@
 
   async function hubCall(body, override) {
     const p = Object.assign(prefs(), override || {});
-    if (!HUB_RE.test(p.hubUrl) || !p.hubKey) throw new Error('Connect your Deal Alerts sheet on the Watch tab first.');
+    if (!HUB_RE.test(p.hubUrl) || !p.hubKey) throw new Error('Connect your Deal Alerts sheet in Settings (⚙) first.');
     let res;
     try {
       res = await fetch(p.hubUrl, { method: 'POST', body: JSON.stringify(Object.assign({ key: p.hubKey }, body)) });
@@ -980,66 +1189,50 @@
   }
   async function loadHub() { hubCache = await hubCall({ action: 'list' }); return hubCache; }
 
+  // Builds › Alerts: automatic build searches, latest deals and the parts you watch.
   function renderWatch() {
-    const p = prefs();
+    const top = buildsTop();
     if (!isHubSet()) {
-      view.innerHTML = `
-        <h2><span>Deal alerts on your phone</span></h2>
-        <p class="small">Your Deal Alerts Google Sheet checks eBay every 15 minutes for the parts you watch and sends a phone notification when one is listed at or under your alert price. Connect it here to add parts from the <b>Shop</b> tab. Both values are in the sheet: <b>Deal alerts → Show connection details</b>.</p>
-        <label class="field"><span>Web app URL</span><input id="h-url" placeholder="https://script.google.com/macros/s/…/exec" value="${esc(p.hubUrl)}"></label>
-        <label class="field"><span>Key</span><input id="h-key" type="password" value="${esc(p.hubKey)}"></label>
-        <div class="actions"><button class="btn" id="h-save" type="button">Connect</button><span id="h-out" class="small"></span></div>
+      view.innerHTML = top + `
+        <div class="auto"><b>Deal alerts on your phone</b>
+          <p class="small" style="margin:4px 0 8px">Your Deal Alerts Google Sheet checks eBay every 15 minutes. It can look for CPU + board bundles and cards that suit each build automatically, and for any part you watch, and notify your phone when one is cheap enough.</p>
+          <button class="btn sm" type="button" data-go="settings">Connect it in Settings</button></div>
         ${sheetWatchHtml()}`;
-      document.getElementById('h-save').addEventListener('click', async () => {
-        const url = document.getElementById('h-url').value.trim();
-        const key = document.getElementById('h-key').value.trim();
-        const out = document.getElementById('h-out');
-        if (!HUB_RE.test(url)) { out.textContent = 'The URL should look like https://script.google.com/macros/s/…/exec'; return; }
-        out.textContent = 'Connecting…';
-        try {
-          hubCache = await hubCall({ action: 'list' }, { hubUrl: url, hubKey: key });
-          await savePrefs({ hubUrl: url, hubKey: key, greatPct: hubCache.greatPct || 25 });
-        } catch (e) { out.textContent = e.message || String(e); return; }
-        try { renderWatch(); } catch (e) { out.textContent = 'Connected, but the list couldn’t be shown: ' + (e.message || e); }
-      });
       return;
     }
     if (!hubCache) {
-      view.innerHTML = '<p class="msg"><span class="spinner" aria-hidden="true"></span>Reading your alerts sheet…</p>';
-      loadHub().then(() => { if (tab === 'watch') renderWatch(); }).catch(e => {
-        if (tab !== 'watch') return;
-        view.innerHTML = `<div class="err-box"><strong>Couldn’t reach your alerts sheet</strong><br>${esc(e.message || e)}</div>
-          <div class="actions"><button class="link" id="h-retry" type="button">Try again</button><button class="link" id="h-forget" type="button">Disconnect</button></div>`;
-        document.getElementById('h-retry').addEventListener('click', () => renderWatch());
-        document.getElementById('h-forget').addEventListener('click', async () => { await savePrefs({ hubUrl: '', hubKey: '' }); renderWatch(); });
+      view.innerHTML = top + '<p class="msg"><span class="spinner" aria-hidden="true"></span>Reading your alerts sheet…</p>';
+      loadHub().then(() => { if (tab === 'builds' && buildsSeg === 'alerts') render(); }).catch(e => {
+        if (!(tab === 'builds' && buildsSeg === 'alerts')) return;
+        view.innerHTML = top + `<div class="err-box"><strong>Couldn’t reach your alerts sheet</strong><br>${esc(e.message || e)}</div>
+          <div class="actions"><button class="link" id="h-retry" type="button">Try again</button><button class="link" type="button" data-go="settings">Check the connection in Settings</button></div>`;
+        wireSeg(s => { buildsSeg = s; });
+        document.getElementById('h-retry').addEventListener('click', () => render());
       });
       return;
     }
     const h = hubCache;
-    const ago = ts => (ts ? new Date(ts).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '');
-    view.innerHTML = `
-      <div class="ok-box small" style="margin-top:0"><b>Deal alerts connected</b>${h.paused ? ' · <span class="tag warn">paused on the sheet</span>' : ''} · ${plural(h.watches.length, 'part')} watched
-        · <button class="link" type="button" id="h-test">Send a test notification</button></div>
-      ${h.alerts && h.alerts.length ? `<h2><span>Latest deals found</span></h2><ul class="list">${h.alerts.slice(0, 8).map(a => `<li><div class="row" style="cursor:default">
-        <span><span class="name">${ext(a.url, esc(a.title))}</span><span class="sub">${esc(a.label)} · ${esc(ago(a.found))}</span></span>
-        <span class="days">${money(a.total)}<small>alert ≤ ${pounds(a.alertAt)}</small></span></div></li>`).join('')}</ul>` : ''}
-      <h2><span>Watching</span><span>${h.watches.length}</span></h2>
+    const plan = model.plan;
+    view.innerHTML = top + `
+      ${h.paused ? '<div class="warn-box">Alerts are paused on the sheet (Deal alerts → Resume).</div>' : ''}
+      ${autoHtml(plan)}
+      <h2><span>Latest deals found</span><span>${h.alerts.length || ''}</span></h2>
+      ${h.alerts.length ? `<ul class="list">${h.alerts.slice(0, 8).map(dealRow).join('')}</ul>` : '<p class="small muted">None yet. They appear here and on your phone as they’re found.</p>'}
+      <details class="more"><summary>Parts you watch (${h.watches.length})</summary>
       ${h.watches.length ? `<ul class="list">${h.watches.map((w, i) => `<li><div class="row" style="cursor:default">
         <span><span class="name">${esc(w.label)}${w.active === false ? ' <span class="tag warn">off</span>' : ''}</span>
         <span class="sub">${w.median ? `median ${money(w.median)} from ${w.n || 0} sales` : 'not priced yet (the Chrome extension prices it next time you open an eBay listing)'}${w.source ? ` · from ${esc(w.source === 'excel' ? 'Excel' : w.source === 'chrome' ? 'Chrome' : w.source)}` : ''}
         · <button class="link" type="button" data-unwatch="${i}">Remove</button></span></span>
         <span class="days">${pounds(w.alertAt)}<small>${w.alertFixed ? 'your price' : 'alert at or under'}</small></span></div></li>`).join('')}</ul>`
-        : '<p class="muted">Nothing watched yet. Use <b>Watch</b> on the Shop tab, or the Watch button in Chrome.</p>'}
-      <p class="small muted">Change alert prices or switch parts off on the Watchlist tab of your Deal Alerts sheet. <button class="link" type="button" id="h-reload">Refresh</button> · <button class="link" type="button" id="h-forget">Disconnect</button></p>`;
-    document.getElementById('h-test').addEventListener('click', async e => {
-      e.target.textContent = 'Sending…';
-      try { await hubCall({ action: 'test', from: 'Excel' }); e.target.textContent = 'Sent'; } catch (x) { e.target.textContent = x.message; }
-    });
-    document.getElementById('h-reload').addEventListener('click', () => { hubCache = null; renderWatch(); });
-    document.getElementById('h-forget').addEventListener('click', async () => { await savePrefs({ hubUrl: '', hubKey: '' }); hubCache = null; renderWatch(); });
+        : '<p class="muted small">Nothing watched yet. Use <b>Watch</b> on the Shopping list, or the Watch button in Chrome.</p>'}
+        <p class="small muted">Change alert prices or switch parts off on the Watchlist tab of your Deal Alerts sheet.</p>
+      </details>
+      <p class="small muted"><button class="link" type="button" id="h-reload">Refresh alerts</button></p>`;
+    wireAuto(plan);
+    document.getElementById('h-reload').addEventListener('click', () => { hubCache = null; render(); });
     view.querySelectorAll('[data-unwatch]').forEach(b => b.addEventListener('click', async () => {
       b.textContent = 'Removing…';
-      try { hubCache = await hubCall({ action: 'remove', labels: [h.watches[+b.dataset.unwatch].label] }); renderWatch(); } catch (x) { b.textContent = x.message; }
+      try { hubCache = await hubCall({ action: 'remove', labels: [h.watches[+b.dataset.unwatch].label] }); render(); } catch (x) { b.textContent = x.message; }
     }));
   }
 
@@ -1050,6 +1243,106 @@
     return `<h2><span>From your last Chrome import</span><span>${rows.length}</span></h2><ul class="list">${rows.map(w => `<li><div class="row" style="cursor:default">
         <span><span class="name">${esc(w['Part'])}</span><span class="sub">median ${money(w['Median Sold'])} from ${esc(w['Sales'] || 0)} sales · updated ${nice(C.serialToIso(w['Updated']))}</span></span>
         <span class="days">${pounds(w['Alert At'])}<small>alert at or under</small></span></div></li>`).join('')}</ul>`;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Settings (⚙): everything you set once. Saved in the workbook, so your partner gets it too.
+  // ---------------------------------------------------------------------------
+
+  function renderSettings() {
+    const p = prefs();
+    const hubOn = isHubSet();
+    const h = hubCache;
+    const hs = hubSettings();
+    const fee = LI.feeShare(salesRows());
+    view.innerHTML = `
+      <div class="set-head"><h1>Settings</h1><span class="small ok-text" id="set-msg" aria-live="polite"></span><button class="btn sm" type="button" id="set-done">Done</button></div>
+
+      <section class="set">
+        <h2><span>Deal alerts</span>${hubOn ? '<span class="tag">connected</span>' : ''}</h2>
+        ${hubOn ? `
+          <p class="small" style="margin:0 0 8px">${h ? `${plural(h.watches.length, 'part')} watched${h.paused ? ' · <span class="tag warn">paused on the sheet</span>' : ''} · ` : ''}<button class="link" type="button" id="h-test">Send a test notification</button> · <button class="link" type="button" id="h-forget">Disconnect</button></p>
+          <div class="field inline"><span>CPU + board bundle</span><input type="number" id="pct-bundle" min="5" max="80" value="${hs.bundlePct}" aria-label="Bundle percentage"> % under value</div>
+          <div class="field inline"><span>Single CPU / card</span><input type="number" id="pct-part" min="5" max="80" value="${hs.partPct}" aria-label="Single part percentage"> % under value</div>
+          <p class="small muted" style="margin:0 0 8px">How far under the parts’ value a CPU + board bundle, or a single CPU or graphics card, must be before your phone is alerted.</p>
+          <div class="actions" style="margin-top:0"><button class="btn sm ghost" type="button" id="pct-save">Save alert levels</button><span class="small" id="pct-msg"></span></div>`
+        : `<p class="small muted" style="margin:0 0 8px">Your Deal Alerts Google Sheet checks eBay every 15 minutes and notifies your phone. Both values are in the sheet: <b>Deal alerts → Show connection details</b>.</p>
+          <label class="field"><span>Web app URL</span><input id="h-url" placeholder="https://script.google.com/macros/s/…/exec" value="${esc(p.hubUrl)}"></label>
+          <label class="field"><span>Key</span><input id="h-key" type="password" value="${esc(p.hubKey)}"></label>
+          <div class="actions" style="margin-top:0"><button class="btn sm" id="h-save" type="button">Connect</button><span id="h-out" class="small"></span></div>`}
+      </section>
+
+      <section class="set">
+        <h2><span>Pricing</span></h2>
+        <div class="field inline"><span>Margin on cost</span><input id="p-margin" type="number" min="0" max="300" value="${p.marginPct}"> %</div>
+        <div class="field inline"><span>Windows</span><select id="p-os">${['Windows 11 Home', 'Windows 11 Pro'].map(o => `<option ${o === p.os ? 'selected' : ''}>${o}</option>`).join('')}</select></div>
+        <div class="field inline"><span>Windows licence value</span>£ <input id="sh-osval" type="number" min="0" step="1" value="${+p.osValue || ''}" placeholder="0"></div>
+        <p class="small muted" style="margin:0">Margin is for the suggested price on the Sell tab. Only give Windows a value if it’s a genuine retail licence: it’s added to the parts’ value on the image. ${fee ? `eBay fees: ${fee}% of the sale price on average, from your recorded sales.` : 'eBay fees are allowed for automatically once you record some eBay sales.'}</p>
+      </section>
+
+      <section class="set">
+        <h2><span>Spec sheet image</span></h2>
+        <label class="small chk-line"><input type="checkbox" id="sh-values" ${p.sheetValues !== false ? 'checked' : ''}> Show part values, total value and the saving</label>
+        <label class="field"><span>Points along the bottom (separate with |)</span><input id="sh-footer" value="${esc(p.sheetFooter != null ? p.sheetFooter : 'Professionally built | Stress-tested & benchmarked | Windows 11 activated')}"></label>
+      </section>
+
+      <section class="set">
+        <h2><span>Listing description</span>${p.descTemplate ? '<span class="tag">your wording</span>' : ''}</h2>
+        <p class="small muted" style="margin:0 0 6px">Your wording for every listing. {Placeholders} are filled in for each build; a paragraph whose placeholder has nothing to show (e.g. no benchmarks yet) is left out.</p>
+        <textarea id="tpl" rows="14" spellcheck="true">${esc(p.descTemplate || LI.DEFAULT_TEMPLATE)}</textarea>
+        <div class="actions"><button class="btn sm ghost" type="button" id="tpl-save">Save wording</button><button class="link" type="button" id="tpl-default">Back to the default</button><span class="small" id="tpl-msg"></span></div>
+        <details class="more"><summary>Placeholders</summary><div class="small muted">${LI.PLACEHOLDERS.map(([k, d]) => `<code>{${esc(k)}}</code> ${esc(d)}`).join(' · ')}</div></details>
+      </section>
+      <p class="small muted">Settings are saved in this workbook, so your business partner gets them too. ${esc(APP_NAME)} ${esc(APP_VERSION)}.</p>`;
+
+    const saved = (el, text) => { if (el) { el.textContent = ' ' + text; setTimeout(() => { el.textContent = ''; }, 2500); } };
+    document.getElementById('set-done').addEventListener('click', () => go(lastTab || 'home'));
+    // Alerts
+    if (!hubOn) {
+      document.getElementById('h-save').addEventListener('click', async () => {
+        const url = document.getElementById('h-url').value.trim();
+        const key = document.getElementById('h-key').value.trim();
+        const out = document.getElementById('h-out');
+        if (!HUB_RE.test(url)) { out.textContent = 'The URL should look like https://script.google.com/macros/s/…/exec'; return; }
+        out.textContent = 'Connecting…';
+        try {
+          hubCache = await hubCall({ action: 'list' }, { hubUrl: url, hubKey: key });
+          await savePrefs({ hubUrl: url, hubKey: key, greatPct: hubCache.greatPct || 25 });
+        } catch (e) { out.textContent = e.message || String(e); return; }
+        renderSettings();
+      });
+    } else {
+      if (!h) loadHub().then(() => { if (tab === 'settings') renderSettings(); }).catch(() => {});
+      document.getElementById('h-test').addEventListener('click', async e => {
+        e.target.textContent = 'Sending…';
+        try { await hubCall({ action: 'test', from: 'Excel' }); e.target.textContent = 'Sent'; } catch (x) { e.target.textContent = x.message; }
+      });
+      document.getElementById('h-forget').addEventListener('click', async () => { await savePrefs({ hubUrl: '', hubKey: '' }); hubCache = null; renderSettings(); });
+      document.getElementById('pct-save').addEventListener('click', async e => {
+        const b = +document.getElementById('pct-bundle').value;
+        const pp = +document.getElementById('pct-part').value;
+        const msg = document.getElementById('pct-msg');
+        if (!(b >= 5 && b <= 80 && pp >= 5 && pp <= 80)) { msg.textContent = ' Use a number between 5 and 80.'; return; }
+        e.target.disabled = true;
+        try { hubCache = await hubCall({ action: 'settings.put', bundlePct: b, partPct: pp }); saved(msg, 'Saved.'); } catch (x) { msg.textContent = ' ' + (x.message || x); }
+        e.target.disabled = false;
+      });
+    }
+    // Pricing and image (saved as soon as they change)
+    const onChange = (id, fn) => document.getElementById(id).addEventListener('change', async e => { await fn(e.target); saved(document.getElementById('set-msg'), 'Saved'); });
+    onChange('p-margin', async el => { await savePrefs({ marginPct: Math.max(0, +el.value || 0) }); Object.keys(sellEdits).forEach(k => { if (sellEdits[k]) delete sellEdits[k].price; }); });
+    onChange('p-os', async el => { await savePrefs({ os: el.value }); Object.keys(sellEdits).forEach(k => delete sellEdits[k]); });
+    onChange('sh-osval', async el => { await savePrefs({ osValue: Math.max(0, +el.value || 0) }); });
+    onChange('sh-values', async el => { await savePrefs({ sheetValues: el.checked }); });
+    onChange('sh-footer', async el => { await savePrefs({ sheetFooter: el.value }); });
+    const saveTpl = async text => {
+      await savePrefs({ descTemplate: text });
+      Object.keys(sellEdits).forEach(k => { if (sellEdits[k]) delete sellEdits[k].description; });   // redraft with the new wording
+      if (!text) document.getElementById('tpl').value = LI.DEFAULT_TEMPLATE;
+      saved(document.getElementById('tpl-msg'), text ? 'Saved. Descriptions now use it.' : 'Back to the default wording.');
+    };
+    document.getElementById('tpl-save').addEventListener('click', () => saveTpl(document.getElementById('tpl').value));
+    document.getElementById('tpl-default').addEventListener('click', () => saveTpl(''));
   }
 
   // ---------------------------------------------------------------------------
@@ -1339,12 +1632,13 @@
   // Start
   // ---------------------------------------------------------------------------
 
-  document.querySelectorAll('.tabs button').forEach(b => b.addEventListener('click', () => { tab = b.dataset.tab; render(); }));
+  document.querySelectorAll('.tabs button').forEach(b => b.addEventListener('click', () => go(b.dataset.tab)));
   document.getElementById('refresh').addEventListener('click', () => { hubCache = null; refresh(); });
+  document.getElementById('open-settings').addEventListener('click', () => (tab === 'settings' ? go(lastTab || 'home') : go('settings')));
 
   Office.onReady(info => {
     if (info.host !== Office.HostType.Excel) {
-      view.innerHTML = '<p class="msg"><strong>Open this in Excel</strong><span class="muted">Deal Checker works with your Business Tracker workbook in Excel.</span></p>';
+      view.innerHTML = `<p class="msg"><strong>Open this in Excel</strong><span class="muted">${APP_NAME} works with your Business Tracker workbook in Excel.</span></p>`;
       return;
     }
     refresh();

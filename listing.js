@@ -54,7 +54,7 @@ var DealListing = (function () {
         case 'mobo': if (!out.mobo) out.mobo = { spec: s, text }; break;
         case 'psu': if (!out.psu) out.psu = { spec: s, text }; break;
         case 'case': if (!out.case) out.case = { text }; break;
-        case 'cooler': if (!out.cooler && /\b(cpu cooler|heatsink|aio|liquid|cooler)\b/i.test(text.replace(/cooler\s?master/i, ''))) out.cooler = { text }; break;
+        case 'cooler': if (!out.cooler && (norm(p['Category']) === 'cpu cooler' || /\b(cpu cooler|heatsink|aio|liquid|cooler)\b/i.test(text.replace(/cooler\s?master/i, '')))) out.cooler = { text }; break;
         default:
       }
     });
@@ -160,22 +160,85 @@ var DealListing = (function () {
     return lines;
   }
 
+  // ---------------------------------------------------------------------------
+  // Description template: your own wording with {placeholders}
+  // ---------------------------------------------------------------------------
+
+  const DEFAULT_TEMPLATE = [
+    'Custom-built {kind}, assembled, tested and ready to use.',
+    '',
+    'Specification',
+    '{specs}',
+    '',
+    'Gaming performance',
+    '{games}',
+    '',
+    'Benchmarks',
+    '{benchmarks}',
+    '',
+    'Every part has been cleaned and tested, and the finished PC has been stress-tested before listing. It comes with a fresh install of {os_name} and up-to-date drivers, so it\'s ready to go out of the box.',
+    '',
+    'Bought separately, these parts are worth about {parts_value}. Our price: {price}, saving you {saving}.',
+    '',
+    "What's included: the PC and a UK power cable. Monitor, keyboard and mouse are not included.",
+    '',
+    'Any questions, just send a message.'
+  ].join('\n');
+
+  const PLACEHOLDERS = [
+    ['specs', 'every part as a bulleted list'],
+    ['games', 'FPS results as a list (from Build Game Testing)'],
+    ['benchmarks', 'benchmark results as a list (from Build Benchmarking)'],
+    ['cpu', 'processor'], ['gpu', 'graphics card'], ['ram', 'memory'], ['storage', 'drives'],
+    ['motherboard', 'motherboard'], ['psu', 'power supply'], ['cooler', 'CPU cooler'], ['case', 'case'],
+    ['os', 'e.g. Windows 11 Home'], ['os_name', 'e.g. Windows 11'],
+    ['kind', '“gaming PC” or “desktop PC”'], ['title', 'the listing title'], ['build_id', 'e.g. B69'],
+    ['price', 'the listing price'], ['parts_value', 'value of the parts'], ['saving', 'parts value minus price']
+  ];
+
+  // The values for one build. extras: { os, title, buildId, games: [{game, settings, avg, low}],
+  // benchmarks: [[tool, text]], price, partsValue }
+  function descriptionVars(parts, extras) {
+    const e = extras || {};
+    const lines = specLines(parts, e);
+    const get = k => (lines.find(([n]) => n === k) || [])[1] || '';
+    const money = v => (typeof v === 'number' && v > 0 ? '£' + Math.round(v).toLocaleString('en-GB') : '');
+    const os = e.os || 'Windows 11 Home';
+    return {
+      specs: lines.map(([k, v]) => `• ${k}: ${v}`).join('\n'),
+      games: (e.games || []).map(g => `• ${g.game}${g.settings ? ` (${g.settings})` : ''}: ${g.avg} FPS average${g.low !== '' && g.low != null ? `, ${g.low} FPS 1% low` : ''}`).join('\n'),
+      benchmarks: (e.benchmarks || []).map(([t, v]) => `• ${t}: ${String(v).replace(/\s{2,}/g, ' ')}`).join('\n'),
+      cpu: get('Processor'), gpu: get('Graphics'), ram: get('Memory'), storage: lines.filter(([k]) => /storage/i.test(k)).map(([, v]) => v).join(', '),
+      motherboard: get('Motherboard'), psu: get('Power supply'), cooler: get('CPU cooler'), case: get('Case'),
+      os, os_name: os.replace(/ (Home|Pro)$/, ''),
+      kind: parts.gpu ? 'gaming PC' : 'desktop PC', title: e.title || '', build_id: e.buildId || parts.id || '',
+      price: money(e.price), parts_value: money(e.partsValue),
+      saving: e.price > 0 && e.partsValue > e.price ? money(e.partsValue - e.price) : ''
+    };
+  }
+
+  /*
+   * Fills {placeholders}. A paragraph (lines between blank lines) that uses a placeholder
+   * with nothing to put in it is left out, so "Benchmarks\n{benchmarks}" disappears for a
+   * build with no benchmarks. Unknown {words} are left as typed.
+   */
+  function fillTemplate(template, vars) {
+    const v = {};
+    Object.keys(vars).forEach(k => { v[k.toLowerCase()] = vars[k]; });
+    return String(template == null ? DEFAULT_TEMPLATE : template).replace(/\r\n/g, '\n').split(/\n\s*\n/).map(par => {
+      let empty = false;
+      const out = par.replace(/\{([a-z_ ]+)\}/gi, (m, name) => {
+        const k = name.trim().toLowerCase().replace(/\s+/g, '_');
+        if (!(k in v)) return m;
+        if (!String(v[k]).trim()) { empty = true; return ''; }
+        return v[k];
+      });
+      return empty ? null : out;
+    }).filter(par => par != null && par.trim()).join('\n\n');
+  }
+
   function description(parts, opts) {
-    const o = opts || {};
-    const lines = specLines(parts, o);
-    const kind = parts.gpu ? 'gaming PC' : 'desktop PC';
-    return [
-      `Custom-built ${kind}, assembled, tested and ready to use.`,
-      '',
-      'Specification',
-      ...lines.map(([k, v]) => `• ${k}: ${v}`),
-      '',
-      `Every part has been cleaned and tested, and the finished PC has been stress-tested${o.benchmarked ? ' and benchmarked' : ''} before listing. It comes with a fresh install of ${(o.os || 'Windows 11 Home').replace(/ (Home|Pro)$/, '')} and up-to-date drivers, so it's ready to go out of the box.`,
-      '',
-      "What's included: the PC and a UK power cable. Monitor, keyboard and mouse are not included.",
-      '',
-      'Any questions, just send a message.'
-    ].join('\n');
+    return fillTemplate(DEFAULT_TEMPLATE, descriptionVars(parts, opts));
   }
 
   function descriptionHtml(text) {
@@ -291,7 +354,7 @@ var DealListing = (function () {
     return '﻿' + [head].concat(rows).map(r => r.map(csvCell).join(',')).join('\r\n') + '\r\n';
   }
 
-  return { partsOf, partsValue, title, specifics, description, descriptionHtml, suggestPrice, feeShare, similarSoldUrl, draft, draftsCsv, EBAY_CATEGORY };
+  return { DEFAULT_TEMPLATE, PLACEHOLDERS, descriptionVars, fillTemplate, partsOf, partsValue, title, specifics, description, descriptionHtml, suggestPrice, feeShare, similarSoldUrl, draft, draftsCsv, EBAY_CATEGORY };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = DealListing;

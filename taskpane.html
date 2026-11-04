@@ -4,22 +4,26 @@
   <meta charset="utf-8">
   <meta http-equiv="X-UA-Compatible" content="IE=Edge">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Deal Checker</title>
+  <title>Rigboard</title>
   <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-  <link rel="stylesheet" href="taskpane.css?v=6">
+  <link rel="stylesheet" href="taskpane.css?v=7">
 </head>
 <body>
   <header class="top">
-    <div class="brand"><span class="mark" aria-hidden="true">£</span>Deal Checker</div>
-    <button class="icon" id="refresh" type="button" title="Refresh from the sheet" aria-label="Refresh">⟳</button>
+    <div class="brand">
+      <svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2.5" fill="currentColor"/><path d="M9 1.5v3M12 1.5v3M15 1.5v3M9 19.5v3M12 19.5v3M15 19.5v3M1.5 9h3M1.5 12h3M1.5 15h3M19.5 9h3M19.5 12h3M19.5 15h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M9.5 15.5v-7h2.8a2 2 0 0 1 0 4H9.5m2.6 0 2.4 3" fill="none" stroke="#123c33" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>Rigboard</span>
+    </div>
+    <div class="tools">
+      <button class="icon" id="refresh" type="button" title="Refresh from the sheet" aria-label="Refresh">⟳</button>
+      <button class="icon" id="open-settings" type="button" title="Settings" aria-label="Settings" aria-pressed="false">⚙</button>
+    </div>
   </header>
   <nav class="tabs" role="tablist" aria-label="Sections">
-    <button role="tab" data-tab="today" aria-selected="true">Today</button>
+    <button role="tab" data-tab="home" aria-selected="true">Home</button>
     <button role="tab" data-tab="builds" aria-selected="false">Builds</button>
-    <button role="tab" data-tab="shop" aria-selected="false">Shop</button>
     <button role="tab" data-tab="sell" aria-selected="false">Sell</button>
-    <button role="tab" data-tab="stock" aria-selected="false">Stock</button>
-    <button role="tab" data-tab="watch" aria-selected="false">Watch</button>
+    <button role="tab" data-tab="money" aria-selected="false">Money</button>
     <button role="tab" data-tab="import" aria-selected="false">Import</button>
   </nav>
   <div id="setup" hidden></div>
@@ -28,9 +32,10 @@
   <script src="specs.js?v=4"></script>
   <script src="pairings.js?v=2"></script>
   <script src="planner.js?v=4"></script>
-  <script src="listing.js?v=2"></script>
+  <script src="listing.js?v=3"></script>
   <script src="sales.js?v=2"></script>
   <script src="specsheet.js?v=3"></script>
-  <script src="taskpane.js?v=10"></script>
+  <script src="finance.js?v=1"></script>
+  <script src="taskpane.js?v=12"></script>
 </body>
 </html>

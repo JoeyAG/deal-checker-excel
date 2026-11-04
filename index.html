@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Deal Checker for Excel</title>
+  <title>Rigboard for Excel</title>
   <style>
     :root { --pcb:#123c33; --pcb-2:#1c5446; --solder:#c9a54c; --paper:#f6f7f5; --ink:#19201d; --muted:#5c6a63; --line:#d6ddd8; }
     * { box-sizing: border-box; }
@@ -22,10 +22,10 @@
   </style>
 </head>
 <body>
-  <header><div><h1>Deal Checker for Excel</h1></div></header>
+  <header><div><h1>Rigboard for Excel</h1></div></header>
   <main>
     <div class="card">
-      <p style="margin-top:0">This page is hosting the Deal Checker panel for Excel. Download your manifest (the small file that tells Excel where the panel lives), then follow the steps in the setup guide.</p>
+      <p style="margin-top:0">This page hosts Rigboard, the panel for your Business Tracker in Excel (formerly Deal Checker). Download your manifest (the small file that tells Excel where the panel lives), then follow the steps in the setup guide.</p>
       <button class="btn" id="dl" type="button">Download manifest</button>
       <div id="status" role="status"></div>
       <p class="muted" style="margin-bottom:0">The manifest points at <code id="base"></code></p>
@@ -34,7 +34,8 @@
     <ol>
       <li>Save the downloaded <code>deal-checker-manifest.xml</code> into a folder on your PC, for example <code>C:\DealCheckerAddin</code>.</li>
       <li>Double-click <code>Install-DealChecker.reg</code> (from the setup guide) and confirm.</li>
-      <li>Restart Excel. <b>Deal Checker</b> appears on the Home tab.</li>
+      <li>Restart Excel. <b>Rigboard</b> appears on the Home tab.</li>
+      <li>Already set up as Deal Checker? Just download the manifest again, save it over the old one in <code>C:\DealCheckerAddin</code>, clear Office’s cache and restart Excel. No need to run the .reg again.</li>
     </ol>
     <p class="muted">The setup guide has every click.</p>
   </main>

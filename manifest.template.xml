@@ -5,11 +5,11 @@
            xmlns:ov="http://schemas.microsoft.com/office/taskpaneappversionoverrides"
            xsi:type="TaskPaneApp">
   <Id>4e7ceb11-700b-5f87-9b36-56343f6d4f4f</Id>
-  <Version>1.0.0.0</Version>
-  <ProviderName>Deal Checker</ProviderName>
+  <Version>2.0.0.0</Version>
+  <ProviderName>Rigboard</ProviderName>
   <DefaultLocale>en-GB</DefaultLocale>
-  <DisplayName DefaultValue="Deal Checker"/>
-  <Description DefaultValue="Test deadlines, builds, stock and eBay purchase import for your Business Tracker."/>
+  <DisplayName DefaultValue="Rigboard"/>
+  <Description DefaultValue="Mission control for your PC business: builds, buying, listings and money, from your Business Tracker."/>
   <IconUrl DefaultValue="{{BASE}}/assets/icon-32.png"/>
   <HighResolutionIconUrl DefaultValue="{{BASE}}/assets/icon-64.png"/>
   <SupportUrl DefaultValue="{{BASE}}/"/>
@@ -75,11 +75,11 @@
         <bt:Url id="Taskpane.Url" DefaultValue="{{BASE}}/taskpane.html"/>
       </bt:Urls>
       <bt:ShortStrings>
-        <bt:String id="Group.Label" DefaultValue="Deal Checker"/>
-        <bt:String id="Button.Label" DefaultValue="Deal Checker"/>
+        <bt:String id="Group.Label" DefaultValue="Rigboard"/>
+        <bt:String id="Button.Label" DefaultValue="Rigboard"/>
       </bt:ShortStrings>
       <bt:LongStrings>
-        <bt:String id="Button.Tooltip" DefaultValue="Open the Deal Checker dashboard: test deadlines, builds, stock and eBay purchase import."/>
+        <bt:String id="Button.Tooltip" DefaultValue="Open Rigboard: what to do next, builds and parts to buy, listings, and the money picture."/>
       </bt:LongStrings>
     </Resources>
   </VersionOverrides>
